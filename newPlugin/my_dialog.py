@@ -3,44 +3,78 @@ from PySide2 import QtWidgets, QtCore
 import http.client
 
 
+def send_get_request(url_template: str, path_params: dict = None, query_params: dict = None):
+    conn = http.client.HTTPConnection("localhost", port=8000)
+
+    if path_params is not None and len(query_params) > 0:
+        for key, value in path_params.items():
+            full_url = url_template.replace(f"{{{key}}}", str(value))
+            print(full_url)
+    elif query_params and len(query_params) > 0:
+        full_url = url_template + "?" + "&".join([f"{key}={value}" for key, value in query_params.items()])
+    else:
+        full_url = url_template
+
+    print(full_url)
+
+    conn.request("GET", full_url)
+    response = conn.getresponse()
+
+    print(response.status, response.reason)
+
+    data = response.read()
+    conn.close()
+
+    return data.decode("utf-8")
+
 class MyDialog(QtWidgets.QDialog):
     def __init__(self):
         super(MyDialog, self).__init__()
-        self.setWindowTitle('My Custom Form')
+        self.setWindowTitle('Search Part by Name')
         self.setGeometry(100, 100, 400, 200)
 
         # Создаем элементы интерфейса
-        self.label = QtWidgets.QLabel('Enter Data:', self)
+        self.label = QtWidgets.QLabel('Enter Part Name:', self)
         self.label.setGeometry(QtCore.QRect(20, 20, 100, 30))
 
         self.textInput = QtWidgets.QLineEdit(self)
         self.textInput.setGeometry(QtCore.QRect(120, 20, 200, 30))
 
-        self.submitButton = QtWidgets.QPushButton('Submit', self)
+        self.submitButton = QtWidgets.QPushButton('Search', self)
         self.submitButton.setGeometry(QtCore.QRect(150, 100, 100, 30))
 
         # Подключаем событие нажатия кнопки к методу
-        self.submitButton.clicked.connect(self.send_http_request)
+        self.submitButton.clicked.connect(self.search_part)
 
-    def send_http_request(self):
+    def search_part(self):
         # Получаем данные из формы
-        user_input = self.textInput.text()
+        part_name = self.textInput.text()
 
-        # Пример отправки HTTP-запроса с использованием http.client
-        conn = http.client.HTTPConnection("example.com")  # Замените на нужный вам домен
-        headers = {'Content-type': 'application/json'}
-        payload = json.dumps({'data': user_input})
+        # Проверка, что поле ввода не пустое
+        if not part_name:
+            QtWidgets.QMessageBox.warning(self, 'Warning', 'Please enter a part name!')
+            return
 
+        # Пример отправки GET-запроса для поиска детали по имени
         try:
-            conn.request("POST", "/api", payload, headers)  # Замените "/api" на нужный вам путь
-            response = conn.getresponse()
+            query_params = {"name": part_name}
+            response = send_get_request("/api/basic_object", query_params=query_params)
 
-            # Проверяем статус ответа
-            if response.status == 200:
-                QtWidgets.QMessageBox.information(self, 'Success', 'Request was successful!')
+            # Парсим ответ
+            data = json.loads(response)
+            print(data)
+            # Проверяем, найдено ли что-то
+            if data:
+                file_path = data['basic_object']['bounding_contour']['brep_files']['path']
+                print(file_path)
+                if file_path:
+                    QtWidgets.QMessageBox.information(self, 'Success', f'Part found: {file_path}')
+                    # Можно открыть файл в FreeCAD, как показано в вашем примере
+                    import FreeCAD
+                    FreeCAD.open(file_path)
+                else:
+                    QtWidgets.QMessageBox.critical(self, 'Error', 'Object found, but no file path available!')
             else:
-                QtWidgets.QMessageBox.critical(self, 'Error', f'Failed to send request! Status: {response.status}')
-
-            conn.close()
+                QtWidgets.QMessageBox.critical(self, 'Error', 'No objects found with this name!')
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {e}')
