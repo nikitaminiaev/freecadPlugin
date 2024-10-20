@@ -37,14 +37,6 @@ def send_post_request(url: str, name: str):
     print(response.status, response.reason)
     conn.close()
 
-def get_part_from_db(part_name):
-    response = send_get_request("/part", {"name": part_name})
-    part_data = json.loads(response)
-    # Преобразуйте part_data в объект FreeCAD
-    # Например, если part_data содержит координаты точек:
-    shape = Part.makePolygon([(p['x'], p['y'], p['z']) for p in part_data['points']])
-    return shape
-
 def save_part_to_db(part_name, shape):
     # Преобразуйте объект FreeCAD в формат, понятный вашему API
     part_data = {
