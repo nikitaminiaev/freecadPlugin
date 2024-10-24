@@ -41,7 +41,7 @@ class MyDialog(QtWidgets.QDialog):
     def __init__(self):
         super(MyDialog, self).__init__()
         self.setWindowTitle('Search Obj by Name')
-        self.setGeometry(100, 100, 500, 150)  # Adjusted width and reduced height
+        self.setGeometry(100, 100, 600, 400)
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -50,11 +50,14 @@ class MyDialog(QtWidgets.QDialog):
         self.label = QtWidgets.QLabel('Enter Obj Name:')
         self.textInput = QtWidgets.QLineEdit()
         self.submitButton = QtWidgets.QPushButton('Search')
+        self.findAllButton = QtWidgets.QPushButton('Find All')
         self.submitButton.clicked.connect(self.search_part)
+        self.findAllButton.clicked.connect(self.find_all_parts)
 
         search_layout.addWidget(self.label)
         search_layout.addWidget(self.textInput)
         search_layout.addWidget(self.submitButton)
+        search_layout.addWidget(self.findAllButton)
 
         layout.addLayout(search_layout)
 
@@ -77,11 +80,54 @@ class MyDialog(QtWidgets.QDialog):
 
         layout.addWidget(self.results_widget)
 
+        # Add table for multiple results
+        self.resultsTable = QtWidgets.QTableWidget()
+        self.resultsTable.setColumnCount(3)
+        self.resultsTable.setHorizontalHeaderLabels(['Name', 'ID', 'Actions'])
+        self.resultsTable.horizontalHeader().setStretchLastSection(True)
+        self.resultsTable.verticalHeader().setVisible(False)
+        self.resultsTable.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        layout.addWidget(self.resultsTable)
+        self.resultsTable.hide()
+
         # Initially hide the results
         self.results_widget.hide()
 
-        # Храним ID детали для дальнейшего использования
+        # Store part ID
         self.part_id = None
+
+    class LoadButton(QtWidgets.QPushButton):
+        def __init__(self, part_id, parent=None):
+            super().__init__('Load', parent)
+            self.part_id = part_id
+
+    def display_multiple_results(self, objects):
+        self.results_widget.hide()
+        self.resultsTable.show()
+        self.resultsTable.setRowCount(len(objects))
+
+        for row, obj in enumerate(objects):
+            # Name column
+            name_item = QtWidgets.QTableWidgetItem(obj.get('name', 'N/A'))
+            self.resultsTable.setItem(row, 0, name_item)
+
+            # ID column
+            part_id = str(obj.get('id', 'N/A'))
+            id_item = QtWidgets.QTableWidgetItem(part_id)
+            self.resultsTable.setItem(row, 1, id_item)
+
+            # Action button column
+            load_button = self.LoadButton(part_id)
+            load_button.clicked.connect(self.handle_load_button)
+            self.resultsTable.setCellWidget(row, 2, load_button)
+
+        self.resultsTable.resizeColumnsToContents()
+
+    def handle_load_button(self):
+        button = self.sender()
+        if isinstance(button, self.LoadButton):
+            self.part_id = button.part_id
+            self.load_object()
 
     def search_part(self):
         part_name = self.textInput.text()
@@ -102,8 +148,9 @@ class MyDialog(QtWidgets.QDialog):
                 self.idOutput.setText(str(part_id))
                 self.part_id = part_id
 
-                # Show the results
+                # Show single result
                 self.results_widget.show()
+                self.resultsTable.hide()
             else:
                 QtWidgets.QMessageBox.critical(self, 'Error', 'No objects found with this name!')
                 self.results_widget.hide()
@@ -111,24 +158,33 @@ class MyDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {e}')
             self.results_widget.hide()
 
+    def find_all_parts(self):
+        try:
+            response = send_get_request("/api/basic_objects")
+            data = json.loads(response)
+
+            if data and 'basic_objects' in data:
+                objects = data['basic_objects']
+                self.display_multiple_results(objects)
+            else:
+                QtWidgets.QMessageBox.critical(self, 'Error', 'No objects found!')
+                self.resultsTable.hide()
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {e}')
+            self.resultsTable.hide()
+
     def load_object(self):
-        # Проверяем, есть ли id детали
         if self.part_id:
             try:
-                # Создаем словарь с id для path_params
                 path_params = {"id": self.part_id}
                 response = send_get_request("/api/basic_object/{id}", path_params=path_params)
-
-                # Парсим ответ
                 data = json.loads(response)
                 print(data)
 
-                # Предполагаем, что путь к файлу находится в этом месте структуры JSON
                 file_path = data.get('bounding_contour', {}).get('brep_files', {}).get('path')
 
                 if file_path:
                     QtWidgets.QMessageBox.information(self, 'Success', f'Part found: {file_path}')
-                    # Можно открыть файл в FreeCAD, как показано в вашем примере
                     import FreeCAD
                     FreeCAD.open(file_path)
                 else:
