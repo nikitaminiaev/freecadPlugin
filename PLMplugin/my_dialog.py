@@ -61,26 +61,7 @@ class MyDialog(QtWidgets.QDialog):
 
         layout.addLayout(search_layout)
 
-        # Results area (initially hidden)
-        self.results_widget = QtWidgets.QWidget()
-        results_layout = QtWidgets.QHBoxLayout(self.results_widget)
-
-        self.nameLabel = QtWidgets.QLabel('Obj Name:')
-        self.nameOutput = QtWidgets.QLabel()
-        self.idLabel = QtWidgets.QLabel('Obj ID:')
-        self.idOutput = QtWidgets.QLabel()
-        self.actionButton = QtWidgets.QPushButton('Load')
-        self.actionButton.clicked.connect(self.load_object)
-
-        results_layout.addWidget(self.nameLabel)
-        results_layout.addWidget(self.nameOutput)
-        results_layout.addWidget(self.idLabel)
-        results_layout.addWidget(self.idOutput)
-        results_layout.addWidget(self.actionButton)
-
-        layout.addWidget(self.results_widget)
-
-        # Add table for multiple results
+        # Add table for results
         self.resultsTable = QtWidgets.QTableWidget()
         self.resultsTable.setColumnCount(3)
         self.resultsTable.setHorizontalHeaderLabels(['Name', 'ID', 'Actions'])
@@ -88,10 +69,6 @@ class MyDialog(QtWidgets.QDialog):
         self.resultsTable.verticalHeader().setVisible(False)
         self.resultsTable.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         layout.addWidget(self.resultsTable)
-        self.resultsTable.hide()
-
-        # Initially hide the results
-        self.results_widget.hide()
 
         # Store part ID
         self.part_id = None
@@ -101,10 +78,13 @@ class MyDialog(QtWidgets.QDialog):
             super().__init__('Load', parent)
             self.part_id = part_id
 
-    def display_multiple_results(self, objects):
-        self.results_widget.hide()
-        self.resultsTable.show()
+    def display_results(self, objects):
+        """Display results in table whether single or multiple objects"""
+        if not isinstance(objects, list):
+            objects = [objects]
+
         self.resultsTable.setRowCount(len(objects))
+        self.resultsTable.show()
 
         for row, obj in enumerate(objects):
             # Name column
@@ -141,22 +121,13 @@ class MyDialog(QtWidgets.QDialog):
             data = json.loads(response)
 
             if data and 'basic_object' in data:
-                part_name = data['basic_object'].get('name', 'N/A')
-                part_id = data['basic_object'].get('id', 'N/A')
-
-                self.nameOutput.setText(part_name)
-                self.idOutput.setText(str(part_id))
-                self.part_id = part_id
-
-                # Show single result
-                self.results_widget.show()
-                self.resultsTable.hide()
+                self.display_results(data['basic_object'])
             else:
                 QtWidgets.QMessageBox.critical(self, 'Error', 'No objects found with this name!')
-                self.results_widget.hide()
+                self.resultsTable.hide()
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {e}')
-            self.results_widget.hide()
+            self.resultsTable.hide()
 
     def find_all_parts(self):
         try:
@@ -165,7 +136,7 @@ class MyDialog(QtWidgets.QDialog):
 
             if data and 'basic_objects' in data:
                 objects = data['basic_objects']
-                self.display_multiple_results(objects)
+                self.display_results(objects)
             else:
                 QtWidgets.QMessageBox.critical(self, 'Error', 'No objects found!')
                 self.resultsTable.hide()
