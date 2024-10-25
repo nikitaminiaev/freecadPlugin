@@ -62,58 +62,92 @@ class MyDialog(QtWidgets.QDialog):
 
         layout.addLayout(search_layout)
 
-        # Add table for results
-        self.resultsTable = QtWidgets.QTableWidget()
-        self.resultsTable.setColumnCount(3)
-        self.resultsTable.setHorizontalHeaderLabels(['Name', 'ID', 'Actions'])
+        # Tree widget setup
+        self.resultsTree = QtWidgets.QTreeWidget()
+        self.resultsTree.setColumnCount(3)
+        self.resultsTree.setHeaderLabels(['Name', 'ID', 'Actions'])
+        self.resultsTree.resizeColumnToContents(0)
+        self.resultsTree.resizeColumnToContents(1)
+        self.resultsTree.setColumnWidth(2, 100)
+        self.resultsTree.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        layout.addWidget(self.resultsTree)
 
-        # Настройка масштабирования колонок
-        header = self.resultsTable.horizontalHeader()
-        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)  # Name колонка растягивается
-        header.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)  # ID колонка растягивается
-        header.setSectionResizeMode(2, QtWidgets.QHeaderView.Fixed)  # Actions колонка фиксированная
-        self.resultsTable.setColumnWidth(2, 100)  # Фиксированная ширина для колонки Actions
+    def display_hierarchical_results(self, objects):
+        self.resultsTree.clear()
 
-        self.resultsTable.verticalHeader().setVisible(False)
-        self.resultsTable.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-        layout.addWidget(self.resultsTable)
-
-        # Store part ID
-        self.part_id = None
-
-    class LoadButton(QtWidgets.QPushButton):
-        def __init__(self, part_id, parent=None):
-            super().__init__('Load', parent)
-            self.part_id = part_id
-
-    def display_results(self, objects):
-        """Display results in table whether single or multiple objects"""
+        # Если objects - это один объект, преобразуем его в список
         if not isinstance(objects, list):
             objects = [objects]
 
-        self.resultsTable.setRowCount(len(objects))
-        self.resultsTable.show()
+        for obj in objects:
+            # Create parent item
+            parent_item = QtWidgets.QTreeWidgetItem([
+                str(obj.get('name', 'N/A')),
+                str(obj.get('id', 'N/A'))
+            ])
+            self.resultsTree.addTopLevelItem(parent_item)
 
-        for row, obj in enumerate(objects):
-            # Name column
-            name_item = QtWidgets.QTableWidgetItem(obj.get('name', 'N/A'))
-            self.resultsTable.setItem(row, 0, name_item)
+            # Create widget to hold the button
+            button_widget = QtWidgets.QWidget()
+            button_layout = QtWidgets.QHBoxLayout(button_widget)
+            button_layout.setContentsMargins(4, 0, 4, 0)
 
-            # ID column
-            part_id = str(obj.get('id', 'N/A'))
-            id_item = QtWidgets.QTableWidgetItem(part_id)
-            self.resultsTable.setItem(row, 1, id_item)
-
-            # Action button column
-            load_button = self.LoadButton(part_id)
+            # Create Load button
+            load_button = QtWidgets.QPushButton('Load')
+            load_button.setProperty('part_id', str(obj.get('id')))
             load_button.clicked.connect(self.handle_load_button)
-            self.resultsTable.setCellWidget(row, 2, load_button)
+            button_layout.addWidget(load_button)
+
+            # Set the widget as item widget
+            self.resultsTree.setItemWidget(parent_item, 2, button_widget)
+
+            # Add child items if present
+            children = obj.get('children', [])
+            for child_id in children:
+                child_item = QtWidgets.QTreeWidgetItem([f"Child {child_id}", str(child_id)])
+                parent_item.addChild(child_item)
+
+                # Create widget for child button
+                child_button_widget = QtWidgets.QWidget()
+                child_button_layout = QtWidgets.QHBoxLayout(child_button_widget)
+                child_button_layout.setContentsMargins(4, 0, 4, 0)
+
+                # Create Load button for child
+                child_load_button = QtWidgets.QPushButton('Load')
+                child_load_button.setProperty('part_id', str(child_id))
+                child_load_button.clicked.connect(self.handle_load_button)
+                child_button_layout.addWidget(child_load_button)
+
+                # Set the widget as item widget for child
+                self.resultsTree.setItemWidget(child_item, 2, child_button_widget)
 
     def handle_load_button(self):
         button = self.sender()
-        if isinstance(button, self.LoadButton):
-            self.part_id = button.part_id
-            self.load_object()
+        if isinstance(button, QtWidgets.QPushButton):
+            part_id = button.property('part_id')
+            if part_id:
+                self.load_object(part_id)
+
+    def load_object(self, part_id):
+        try:
+            path_params = {"id": part_id}
+            response = send_get_request("/api/basic_object/{id}", path_params=path_params)
+            data = json.loads(response)
+            print(f"Loaded data for part {part_id}:", data)
+
+            file_path = data.get('bounding_contour', {}).get('brep_files', {}).get('path')
+
+            if file_path:
+                QtWidgets.QMessageBox.information(self, 'Success', f'Part found: {file_path}')
+                try:
+                    import FreeCAD
+                    FreeCAD.open(file_path)
+                except Exception as e:
+                    QtWidgets.QMessageBox.critical(self, 'Error', f'Failed to open file in FreeCAD: {str(e)}')
+            else:
+                QtWidgets.QMessageBox.critical(self, 'Error', 'Object found, but no file path available!')
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred while loading the object: {str(e)}')
 
     def search_part(self):
         part_name = self.textInput.text()
@@ -126,47 +160,64 @@ class MyDialog(QtWidgets.QDialog):
             response = send_get_request("/api/basic_object", query_params=query_params)
             data = json.loads(response)
 
-            if data and 'basic_object' in data:
-                self.display_results(data['basic_object'])
+            print("Search response:", data)  # Добавим для отладки
+
+            if isinstance(data, dict) and 'error' in data:
+                QtWidgets.QMessageBox.critical(self, 'Error', str(data['error']))
+                return
+
+            # Проверяем различные возможные структуры ответа
+            objects = None
+            if isinstance(data, list):
+                objects = data
+            elif isinstance(data, dict):
+                if 'basic_object' in data:
+                    objects = data['basic_object']
+                elif 'basic_objects' in data:
+                    objects = data['basic_objects']
+                else:
+                    objects = [data]  # Если это одиночный объект
+
+            if objects:
+                self.display_hierarchical_results(objects)
+                self.resultsTree.show()
             else:
-                QtWidgets.QMessageBox.critical(self, 'Error', 'No objects found with this name!')
-                self.resultsTable.hide()
+                QtWidgets.QMessageBox.information(self, 'Information', 'No objects found with this name!')
+                self.resultsTree.clear()
+
         except Exception as e:
-            QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {e}')
-            self.resultsTable.hide()
+            print(f"Exception in search_part: {str(e)}")  # Добавим для отладки
+            QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
+            self.resultsTree.clear()
 
     def find_all_parts(self):
         try:
             response = send_get_request("/api/basic_objects")
             data = json.loads(response)
 
-            if data and 'basic_objects' in data:
-                objects = data['basic_objects']
-                self.display_results(objects)
-            else:
-                QtWidgets.QMessageBox.critical(self, 'Error', 'No objects found!')
-                self.resultsTable.hide()
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {e}')
-            self.resultsTable.hide()
+            if isinstance(data, dict) and 'error' in data:
+                QtWidgets.QMessageBox.critical(self, 'Error', str(data['error']))
+                return
 
-    def load_object(self):
-        if self.part_id:
-            try:
-                path_params = {"id": self.part_id}
-                response = send_get_request("/api/basic_object/{id}", path_params=path_params)
-                data = json.loads(response)
-                print(data)
-
-                file_path = data.get('bounding_contour', {}).get('brep_files', {}).get('path')
-
-                if file_path:
-                    QtWidgets.QMessageBox.information(self, 'Success', f'Part found: {file_path}')
-                    import FreeCAD
-                    FreeCAD.open(file_path)
+            objects = None
+            if isinstance(data, list):
+                objects = data
+            elif isinstance(data, dict):
+                if 'basic_objects' in data:
+                    objects = data['basic_objects']
+                elif 'basic_object' in data:
+                    objects = data['basic_object']
                 else:
-                    QtWidgets.QMessageBox.critical(self, 'Error', 'Object found, but no file path available!')
-            except Exception as e:
-                QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {e}')
-        else:
-            QtWidgets.QMessageBox.warning(self, 'Warning', 'No part selected!')
+                    objects = [data]
+
+            if objects:
+                self.display_hierarchical_results(objects)
+                self.resultsTree.show()
+            else:
+                QtWidgets.QMessageBox.information(self, 'Information', 'No objects found!')
+                self.resultsTree.clear()
+
+        except Exception as e:
+            print(f"Exception in find_all_parts: {str(e)}")
+            QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
+            self.resultsTree.clear()
