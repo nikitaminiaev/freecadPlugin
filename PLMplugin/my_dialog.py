@@ -37,10 +37,11 @@ def send_get_request(url_template: str, path_params: dict = None, query_params: 
     finally:
         conn.close()
 
+
 class MyDialog(QtWidgets.QDialog):
     def __init__(self):
         super(MyDialog, self).__init__()
-        self.setWindowTitle('Search Obj by Name')
+        self.setWindowTitle('PLM')
         self.setGeometry(100, 100, 600, 400)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -65,7 +66,14 @@ class MyDialog(QtWidgets.QDialog):
         self.resultsTable = QtWidgets.QTableWidget()
         self.resultsTable.setColumnCount(3)
         self.resultsTable.setHorizontalHeaderLabels(['Name', 'ID', 'Actions'])
-        self.resultsTable.horizontalHeader().setStretchLastSection(True)
+
+        # Настройка масштабирования колонок
+        header = self.resultsTable.horizontalHeader()
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)  # Name колонка растягивается
+        header.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)  # ID колонка растягивается
+        header.setSectionResizeMode(2, QtWidgets.QHeaderView.Fixed)  # Actions колонка фиксированная
+        self.resultsTable.setColumnWidth(2, 100)  # Фиксированная ширина для колонки Actions
+
         self.resultsTable.verticalHeader().setVisible(False)
         self.resultsTable.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         layout.addWidget(self.resultsTable)
@@ -100,8 +108,6 @@ class MyDialog(QtWidgets.QDialog):
             load_button = self.LoadButton(part_id)
             load_button.clicked.connect(self.handle_load_button)
             self.resultsTable.setCellWidget(row, 2, load_button)
-
-        self.resultsTable.resizeColumnsToContents()
 
     def handle_load_button(self):
         button = self.sender()
