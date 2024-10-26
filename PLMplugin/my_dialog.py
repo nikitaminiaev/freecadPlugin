@@ -38,7 +38,7 @@ def send_get_request(url_template: str, path_params: dict = None, query_params: 
         conn.close()
 
 
-class MyDialog(QtWidgets.QDialog):
+class MyDialog(QtWidgets.QWidget):
     def __init__(self):
         super(MyDialog, self).__init__()
         self.setWindowTitle('PLM')
