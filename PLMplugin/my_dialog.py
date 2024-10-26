@@ -66,60 +66,73 @@ class MyDialog(QtWidgets.QDialog):
         self.resultsTree = QtWidgets.QTreeWidget()
         self.resultsTree.setColumnCount(3)
         self.resultsTree.setHeaderLabels(['Name', 'ID', 'Actions'])
-        self.resultsTree.resizeColumnToContents(0)
-        self.resultsTree.resizeColumnToContents(1)
-        self.resultsTree.setColumnWidth(2, 100)
+
+        header = self.resultsTree.header()
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)  # Name колонка растягивается
+        header.setSectionResizeMode(1, QtWidgets.QHeaderView.Interactive)  # ID колонка может быть изменена пользователем
+        header.setSectionResizeMode(2, QtWidgets.QHeaderView.Fixed)  # Actions колонка фиксированной ширины
+
+        # Устанавливаем начальные размеры колонок
+        self.resultsTree.setColumnWidth(1, 100)  # ID колонка
+        self.resultsTree.setColumnWidth(2, 80)  # Actions колонка
+
         self.resultsTree.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         layout.addWidget(self.resultsTree)
 
-    def display_hierarchical_results(self, objects):
+    def display_hierarchical_results(self, objects, is_search_result=False):
         self.resultsTree.clear()
 
-        # Если objects - это один объект, преобразуем его в список
+        # Convert to list if single object
         if not isinstance(objects, list):
             objects = [objects]
+            is_search_result = True  # Если получен один объект, считаем это результатом поиска
 
-        for obj in objects:
-            # Create parent item
-            parent_item = QtWidgets.QTreeWidgetItem([
-                str(obj.get('name', 'N/A')),
-                str(obj.get('id', 'N/A'))
-            ])
-            self.resultsTree.addTopLevelItem(parent_item)
+        # Create a dictionary to store all objects by their ID for quick lookup
+        objects_dict = {obj['id']: obj for obj in objects}
 
-            # Create widget to hold the button
-            button_widget = QtWidgets.QWidget()
-            button_layout = QtWidgets.QHBoxLayout(button_widget)
-            button_layout.setContentsMargins(4, 0, 4, 0)
+        # Если это результат поиска, показываем все найденные объекты
+        if is_search_result:
+            for obj in objects:
+                self._add_object_to_tree(obj, objects_dict)
+        # Иначе показываем только корневые объекты (с пустым parents)
+        else:
+            for obj in objects:
+                if not obj.get('parents', []):
+                    self._add_object_to_tree(obj, objects_dict)
 
-            # Create Load button
-            load_button = QtWidgets.QPushButton('Load')
-            load_button.setProperty('part_id', str(obj.get('id')))
-            load_button.clicked.connect(self.handle_load_button)
-            button_layout.addWidget(load_button)
+    def _add_object_to_tree(self, obj, objects_dict, parent_item=None):
+        # Create tree item
+        item = QtWidgets.QTreeWidgetItem([
+            str(obj.get('name', 'N/A')),
+            str(obj.get('id', 'N/A'))
+        ])
 
-            # Set the widget as item widget
-            self.resultsTree.setItemWidget(parent_item, 2, button_widget)
+        # Add to root if no parent_item, otherwise add as child
+        if parent_item is None:
+            self.resultsTree.addTopLevelItem(item)
+        else:
+            parent_item.addChild(item)
 
-            # Add child items if present
-            children = obj.get('children', [])
-            for child_id in children:
-                child_item = QtWidgets.QTreeWidgetItem([f"Child {child_id}", str(child_id)])
-                parent_item.addChild(child_item)
+        # Create widget for the button
+        button_widget = QtWidgets.QWidget()
+        button_layout = QtWidgets.QHBoxLayout(button_widget)
+        button_layout.setContentsMargins(4, 0, 4, 0)
 
-                # Create widget for child button
-                child_button_widget = QtWidgets.QWidget()
-                child_button_layout = QtWidgets.QHBoxLayout(child_button_widget)
-                child_button_layout.setContentsMargins(4, 0, 4, 0)
+        # Create Load button
+        load_button = QtWidgets.QPushButton('Load')
+        load_button.setProperty('part_id', str(obj.get('id')))
+        load_button.clicked.connect(self.handle_load_button)
+        button_layout.addWidget(load_button)
 
-                # Create Load button for child
-                child_load_button = QtWidgets.QPushButton('Load')
-                child_load_button.setProperty('part_id', str(child_id))
-                child_load_button.clicked.connect(self.handle_load_button)
-                child_button_layout.addWidget(child_load_button)
+        # Set the widget as item widget
+        self.resultsTree.setItemWidget(item, 2, button_widget)
 
-                # Set the widget as item widget for child
-                self.resultsTree.setItemWidget(child_item, 2, child_button_widget)
+        # Recursively add children
+        children = obj.get('children', [])
+        for child_id in children:
+            child_obj = objects_dict.get(child_id)
+            if child_obj:
+                self._add_object_to_tree(child_obj, objects_dict, item)
 
     def handle_load_button(self):
         button = self.sender()
@@ -160,13 +173,12 @@ class MyDialog(QtWidgets.QDialog):
             response = send_get_request("/api/basic_object", query_params=query_params)
             data = json.loads(response)
 
-            print("Search response:", data)  # Добавим для отладки
+            print("Search response:", data)
 
             if isinstance(data, dict) and 'error' in data:
                 QtWidgets.QMessageBox.critical(self, 'Error', str(data['error']))
                 return
 
-            # Проверяем различные возможные структуры ответа
             objects = None
             if isinstance(data, list):
                 objects = data
@@ -176,17 +188,17 @@ class MyDialog(QtWidgets.QDialog):
                 elif 'basic_objects' in data:
                     objects = data['basic_objects']
                 else:
-                    objects = [data]  # Если это одиночный объект
+                    objects = [data]
 
             if objects:
-                self.display_hierarchical_results(objects)
+                self.display_hierarchical_results(objects, is_search_result=True)  # Добавлен параметр is_search_result
                 self.resultsTree.show()
             else:
                 QtWidgets.QMessageBox.information(self, 'Information', 'No objects found with this name!')
                 self.resultsTree.clear()
 
         except Exception as e:
-            print(f"Exception in search_part: {str(e)}")  # Добавим для отладки
+            print(f"Exception in search_part: {str(e)}")
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
             self.resultsTree.clear()
 
@@ -211,7 +223,8 @@ class MyDialog(QtWidgets.QDialog):
                     objects = [data]
 
             if objects:
-                self.display_hierarchical_results(objects)
+                self.display_hierarchical_results(objects,
+                                                  is_search_result=False)  # Явно указываем, что это не результат поиска
                 self.resultsTree.show()
             else:
                 QtWidgets.QMessageBox.information(self, 'Information', 'No objects found!')
