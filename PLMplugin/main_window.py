@@ -26,19 +26,74 @@ class PLMMainWindow(QtWidgets.QWidget):
         self.textInput = QtWidgets.QLineEdit()
         self.submitButton = QtWidgets.QPushButton('Search')
         self.findAllButton = QtWidgets.QPushButton('Find All')
+        self.uploadActiveButton = QtWidgets.QPushButton('Upload Active')
 
         self.submitButton.clicked.connect(self.search_part)
         self.findAllButton.clicked.connect(self.find_all_parts)
+        self.uploadActiveButton.clicked.connect(self.upload_active_file)
 
         search_layout.addWidget(self.label)
         search_layout.addWidget(self.textInput)
         search_layout.addWidget(self.submitButton)
         search_layout.addWidget(self.findAllButton)
+        search_layout.addWidget(self.uploadActiveButton)
         layout.addLayout(search_layout)
 
         # Tree widget
         self.resultsTree = ObjectTreeWidget()
         layout.addWidget(self.resultsTree)
+
+    def upload_active_file(self):
+        """Upload currently active file to the server"""
+        try:
+            import FreeCAD
+            active_doc = FreeCAD.ActiveDocument
+            if not active_doc:
+                QtWidgets.QMessageBox.warning(self, 'Warning', 'No active document found in FreeCAD!')
+                return
+
+            file_path = active_doc.FileName.encode().decode('utf-8')
+            label = active_doc.Label.encode().decode('utf-8')
+            author = active_doc.CreatedBy.encode().decode('utf-8')
+            if not file_path:
+                QtWidgets.QMessageBox.warning(self, 'Warning', 'Active document has no file path!')
+                return
+
+            # Prepare the payload
+            payload = {
+                "is_assembly": False,  # You might want to detect this automatically
+                "brep_files": {
+                    "path": file_path
+                },
+                "name": label,
+                "author": author,
+                "description": f"Uploaded from FreeCAD: {label}",
+                "coordinates": {
+                    "x": 0,
+                    "y": 0,
+                    "z": 0
+                },
+                "role": "uploaded_part",
+                "role_description": "Part uploaded from active FreeCAD document"
+            }
+
+            # Send POST request
+            response = self.api_client.send_post_request(
+                "/api/basic_object/",
+                payload
+            )
+            data = json.loads(response)
+
+            if isinstance(data, dict) and 'error' in data:
+                QtWidgets.QMessageBox.critical(self, 'Error', str(data['error']))
+                return
+
+            QtWidgets.QMessageBox.information(self, 'Success', 'File uploaded successfully!')
+
+        except ImportError:
+            QtWidgets.QMessageBox.critical(self, 'Error', 'FreeCAD module not available!')
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred while uploading: {str(e)}')
 
     def search_part(self):
         part_name = self.textInput.text()

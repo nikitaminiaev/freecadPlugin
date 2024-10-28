@@ -6,6 +6,37 @@ class APIClient:
         self.host = host
         self.port = port
 
+    def send_post_request(self, url: str, payload: dict):
+        """Send POST request to the API"""
+        conn = http.client.HTTPConnection(self.host, port=self.port)
+
+        try:
+            headers = {
+                'Content-Type': 'application/json'
+            }
+
+            json_payload = json.dumps(payload)
+            print(f"Sending POST to URL: {url}")
+            print(f"Payload: {json_payload}")
+
+            conn.request("POST", url, body=json_payload, headers=headers)
+            response = conn.getresponse()
+            print(f"Response status: {response.status} {response.reason}")
+
+            if response.status in [200, 201]:
+                data = response.read()
+                return data.decode("utf-8")
+            else:
+                print(f"Error response: {response.status} {response.reason}")
+                return json.dumps({"error": f"HTTP {response.status}: {response.reason}"})
+
+        except Exception as e:
+            print(f"Exception in send_post_request: {str(e)}")
+            return json.dumps({"error": str(e)})
+
+        finally:
+            conn.close()
+
     def send_get_request(self, url_template: str, path_params: dict = None, query_params: dict = None):
         conn = http.client.HTTPConnection(self.host, port=self.port)
 
