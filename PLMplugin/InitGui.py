@@ -1,6 +1,5 @@
 import FreeCAD
 import FreeCADGui
-from PySide2 import QtWidgets
 
 
 class MyPlugin:
@@ -9,9 +8,9 @@ class MyPlugin:
 
     def Activated(self):
         try:
-            from my_dialog import MyDialog
+            from main_window import PLMMainWindow
             if self.form is None:  # Если форма еще не создана
-                self.form = MyDialog()
+                self.form = PLMMainWindow()
             if self.form:  # Проверяем, что форма успешно создана
                 self.form.show()
             else:
