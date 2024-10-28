@@ -46,11 +46,7 @@ class PLMMainWindow(QtWidgets.QWidget):
     def upload_active_file(self):
         """Upload currently active file to the server"""
         try:
-            import FreeCAD
-            active_doc = FreeCAD.ActiveDocument
-            if not active_doc:
-                QtWidgets.QMessageBox.warning(self, 'Warning', 'No active document found in FreeCAD!')
-                return
+            active_doc = CADUtils.get_active_doc()
 
             file_path = active_doc.FileName.encode().decode('utf-8')
             label = active_doc.Label.encode().decode('utf-8')
@@ -83,10 +79,23 @@ class PLMMainWindow(QtWidgets.QWidget):
                 payload
             )
             data = json.loads(response)
+            print(data)
+            if isinstance(data, dict):
+                if 'error' in data:
+                    QtWidgets.QMessageBox.critical(self, 'Error', str(data['error']))
+                    return
 
-            if isinstance(data, dict) and 'error' in data:
-                QtWidgets.QMessageBox.critical(self, 'Error', str(data['error']))
-                return
+                if 'id' not in data:
+                    QtWidgets.QMessageBox.critical(self, 'Error', 'Server response missing object ID')
+                    return
+
+                try:
+                    CADUtils.save_id(active_doc, data['id'])
+                    QtWidgets.QMessageBox.information(self, 'Success',
+                                                      f'File uploaded successfully! Object ID: {data["id"]} saved to document.')
+                except Exception as e:
+                    QtWidgets.QMessageBox.warning(self, 'Warning',
+                                                  f'File uploaded but failed to save ID to document: {str(e)}')
 
             QtWidgets.QMessageBox.information(self, 'Success', 'File uploaded successfully!')
 
