@@ -55,7 +55,6 @@ class PLMMainWindow(QtWidgets.QWidget):
                 QtWidgets.QMessageBox.warning(self, 'Warning', 'Active document has no file path!')
                 return
 
-            # Prepare the payload
             payload = {
                 "is_assembly": False,  # You might want to detect this automatically
                 "brep_files": {
@@ -72,12 +71,33 @@ class PLMMainWindow(QtWidgets.QWidget):
                 "role": "uploaded_part",
                 "role_description": "Part uploaded from active FreeCAD document"
             }
+            # Проверяем, существует ли уже объект с таким ID
+            existing_id = getattr(active_doc, 'Id', None)
 
-            # Send POST request
-            response = self.api_client.send_post_request(
-                "/api/basic_object/",
-                payload
-            )
+            if existing_id:  # Проверяем только если есть ID
+                try:
+                    self.api_client.send_get_request(
+                        "/api/basic_object/{id}",
+                        path_params={"id": existing_id}
+                    )
+                    # Если объект существует, используем PATCH запрос
+                    response = self.api_client.send_patch_request(
+                        f"/api/basic_object/{existing_id}",
+                        payload
+                    )
+                except Exception:
+                    # Если получили 404 или другую ошибку при поиске, создаем новый объект
+                    response = self.api_client.send_post_request(
+                        "/api/basic_object/",
+                        payload
+                    )
+            else:
+                # Если ID нет, сразу создаем новый объект
+                response = self.api_client.send_post_request(
+                    "/api/basic_object/",
+                    payload
+                )
+
             data = json.loads(response)
             print(data)
             if isinstance(data, dict):

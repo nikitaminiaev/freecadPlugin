@@ -6,8 +6,14 @@ class APIClient:
         self.host = host
         self.port = port
 
-    def send_post_request(self, url: str, payload: dict):
-        """Send POST request to the API"""
+    def _send_request_with_body(self, method: str, url: str, payload: dict):
+        """Send request with JSON body to the API
+
+        Args:
+            method: HTTP method ("POST", "PATCH", etc)
+            url: Request URL
+            payload: Dictionary to be sent as JSON payload
+        """
         conn = http.client.HTTPConnection(self.host, port=self.port)
 
         try:
@@ -16,10 +22,10 @@ class APIClient:
             }
 
             json_payload = json.dumps(payload)
-            print(f"Sending POST to URL: {url}")
+            print(f"Sending {method} to URL: {url}")
             print(f"Payload: {json_payload}")
 
-            conn.request("POST", url, body=json_payload, headers=headers)
+            conn.request(method, url, body=json_payload, headers=headers)
             response = conn.getresponse()
             print(f"Response status: {response.status} {response.reason}")
 
@@ -31,11 +37,17 @@ class APIClient:
                 return json.dumps({"error": f"HTTP {response.status}: {response.reason}"})
 
         except Exception as e:
-            print(f"Exception in send_post_request: {str(e)}")
+            print(f"Exception in send_request_with_body: {str(e)}")
             return json.dumps({"error": str(e)})
 
         finally:
             conn.close()
+
+    def send_post_request(self, url: str, payload: dict):
+        return self._send_request_with_body("POST", url, payload)
+
+    def send_patch_request(self, url: str, payload: dict):
+        return self._send_request_with_body("PATCH", url, payload)
 
     def send_get_request(self, url_template: str, path_params: dict = None, query_params: dict = None):
         conn = http.client.HTTPConnection(self.host, port=self.port)
