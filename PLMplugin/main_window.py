@@ -26,7 +26,7 @@ class PLMMainWindow(QtWidgets.QWidget):
         self.textInput = QtWidgets.QLineEdit()
         self.submitButton = QtWidgets.QPushButton('Search')
         self.findAllButton = QtWidgets.QPushButton('Find All')
-        self.uploadActiveButton = QtWidgets.QPushButton('Upload Active')
+        self.uploadActiveButton = QtWidgets.QPushButton('Save')
 
         self.submitButton.clicked.connect(self.search_part)
         self.findAllButton.clicked.connect(self.find_all_parts)
