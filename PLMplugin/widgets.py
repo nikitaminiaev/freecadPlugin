@@ -6,16 +6,19 @@ class ObjectTreeWidget(QtWidgets.QTreeWidget):
         self.setup_ui()
 
     def setup_ui(self):
-        self.setColumnCount(3)
-        self.setHeaderLabels(['Name', 'ID', 'Actions'])
+        headers = ['Name', 'ID', 'Actions']
+        self.setColumnCount(len(headers))
+        self.setHeaderLabels(headers)
 
         header = self.header()
-        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
-        header.setSectionResizeMode(1, QtWidgets.QHeaderView.Interactive)
-        header.setSectionResizeMode(2, QtWidgets.QHeaderView.Fixed)
 
-        self.setColumnWidth(1, 100)
-        self.setColumnWidth(2, 80)
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Interactive)
+        header.setSectionResizeMode(1, QtWidgets.QHeaderView.Interactive)
+        header.setSectionResizeMode(2, QtWidgets.QHeaderView.Stretch)
+
+        self.setColumnWidth(0, 240)
+        self.setColumnWidth(1, 240)
+
         self.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
 
     def display_hierarchical_results(self, objects, is_search_result=False, load_callback=None):
