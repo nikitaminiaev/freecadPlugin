@@ -114,7 +114,8 @@ class PLMMainWindow(QtWidgets.QWidget):
                     return
 
                 try:
-                    CADUtils.save_id(active_doc, data['id'])
+                    if hasattr(selected_obj, 'Id'):
+                        selected_obj.Id = data['id']
                 except Exception as e:
                     QtWidgets.QMessageBox.warning(self, 'Warning',
                                                   f'File uploaded but failed to save ID to document: {str(e)}')
@@ -187,8 +188,9 @@ class PLMMainWindow(QtWidgets.QWidget):
             obj = BasicObject(data)
 
             if obj.brep_string:
-                active_doc = CADUtils.get_active_doc()
-                if not active_doc:
+                try:
+                    CADUtils.get_active_doc()
+                except:
                     CADUtils.create_new_doc(f"Document_{part_id}")
 
                 part_dto = PartCreationDTO(

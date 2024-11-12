@@ -109,7 +109,7 @@ class CADUtils:
         """
         try:
             import FreeCAD
-
+            import FreeCADGui as Gui
             doc = FreeCAD.ActiveDocument
             if not doc:
                 raise Exception("No active document")
@@ -123,6 +123,7 @@ class CADUtils:
             CADUtils._set_object_properties(part_obj, data)
 
             doc.recompute()
+            Gui.SendMsgToActiveView("ViewFit")
 
             return part_obj
         except Exception as e:
