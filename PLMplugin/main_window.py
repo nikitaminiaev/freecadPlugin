@@ -53,7 +53,8 @@ class PLMMainWindow(QtWidgets.QWidget):
             if not selected_objs:
                 QtWidgets.QMessageBox.warning(self, 'Warning', 'No object selected in FreeCAD!')
                 return
-            part_dto = CADUtils.create_dto_from_object(selected_objs[0])
+            selected_obj = selected_objs[0]
+            part_dto = CADUtils.create_dto_from_object(selected_obj)
             label = part_dto.label.encode().decode('utf-8')
 
             payload = {
@@ -114,13 +115,9 @@ class PLMMainWindow(QtWidgets.QWidget):
 
                 try:
                     CADUtils.save_id(active_doc, data['id'])
-                    QtWidgets.QMessageBox.information(self, 'Success',
-                                                      f'File uploaded successfully! Object ID: {data["id"]} saved to document.')
                 except Exception as e:
                     QtWidgets.QMessageBox.warning(self, 'Warning',
                                                   f'File uploaded but failed to save ID to document: {str(e)}')
-
-            QtWidgets.QMessageBox.information(self, 'Success', 'File uploaded successfully!')
 
         except ImportError:
             QtWidgets.QMessageBox.critical(self, 'Error', 'FreeCAD module not available!')
@@ -149,7 +146,6 @@ class PLMMainWindow(QtWidgets.QWidget):
                     load_callback=self.load_object
                 )
             else:
-                QtWidgets.QMessageBox.information(self, 'Information', 'No objects found with this name!')
                 self.resultsTree.clear()
 
         except Exception as e:
@@ -174,7 +170,6 @@ class PLMMainWindow(QtWidgets.QWidget):
                     load_callback=self.load_object
                 )
             else:
-                QtWidgets.QMessageBox.information(self, 'Information', 'No objects found!')
                 self.resultsTree.clear()
 
         except Exception as e:
@@ -209,9 +204,7 @@ class PLMMainWindow(QtWidgets.QWidget):
                     )
                 )
 
-                new_part = CADUtils.create_part_with_brep(part_dto)
-
-                QtWidgets.QMessageBox.information(self, 'Success', f'Part "{new_part.Label}" loaded successfully.')
+                CADUtils.create_part_with_brep(part_dto)
             else:
                 QtWidgets.QMessageBox.critical(self, 'Error', 'Object found, but no BREP data available!')
         except Exception as e:

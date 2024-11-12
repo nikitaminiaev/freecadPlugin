@@ -117,7 +117,7 @@ class CADUtils:
             part_obj = doc.addObject('App::Part', data.label)
             body_obj = doc.addObject('Part::Feature', 'Body')
 
-            shape = CADUtils.create_shape_from_brep(data.brep_string)
+            shape = CADUtils._create_shape_from_brep(data.brep_string)
             body_obj.Shape = shape
             part_obj.Group = [body_obj]
             CADUtils._set_object_properties(part_obj, data)
@@ -171,7 +171,7 @@ class CADUtils:
             raise Exception(f'Failed to set object group: {str(e)}')
 
     @staticmethod
-    def create_shape_from_brep(brep_string):
+    def _create_shape_from_brep(brep_string):
         """Create shape object from BREP string"""
         try:
             import Part
