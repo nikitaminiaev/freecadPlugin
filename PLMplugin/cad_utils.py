@@ -115,10 +115,11 @@ class CADUtils:
                 raise Exception("No active document")
 
             part_obj = doc.addObject('App::Part', data.label)
+            body_obj = doc.addObject('Part::Feature', 'Body')
 
             shape = CADUtils.create_shape_from_brep(data.brep_string)
-            part_obj.Shape = shape
-
+            body_obj.Shape = shape
+            part_obj.Group = [body_obj]
             CADUtils._set_object_properties(part_obj, data)
 
             doc.recompute()

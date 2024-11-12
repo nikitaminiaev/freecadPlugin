@@ -2,7 +2,7 @@ import json
 
 from PySide2 import QtWidgets
 
-from cad_utils import CADUtils
+from cad_utils import CADUtils, PartCreationDTO, Coordinates
 from models import BasicObject
 from widgets import ObjectTreeWidget
 from api_client import APIClient
@@ -30,7 +30,7 @@ class PLMMainWindow(QtWidgets.QWidget):
 
         self.submitButton.clicked.connect(self.search_part)
         self.findAllButton.clicked.connect(self.find_all_parts)
-        self.uploadActiveButton.clicked.connect(self.upload_active_file)
+        self.uploadActiveButton.clicked.connect(self.upload_active_part)
 
         search_layout.addWidget(self.label)
         search_layout.addWidget(self.textInput)
@@ -43,36 +43,39 @@ class PLMMainWindow(QtWidgets.QWidget):
         self.resultsTree = ObjectTreeWidget()
         layout.addWidget(self.resultsTree)
 
-    def upload_active_file(self):
+    def upload_active_part(self):
         """Upload currently active file to the server"""
         try:
             active_doc = CADUtils.get_active_doc()
-
-            file_path = active_doc.FileName.encode().decode('utf-8')
-            label = active_doc.Label.encode().decode('utf-8')
             author = active_doc.CreatedBy.encode().decode('utf-8')
-            if not file_path:
-                QtWidgets.QMessageBox.warning(self, 'Warning', 'Active document has no file path!')
+
+            selected_objs = CADUtils.get_all_selected_obj()
+            if not selected_objs:
+                QtWidgets.QMessageBox.warning(self, 'Warning', 'No object selected in FreeCAD!')
                 return
+            part_dto = CADUtils.create_dto_from_object(selected_objs[0])
+            label = part_dto.label.encode().decode('utf-8')
 
             payload = {
                 "is_assembly": False,  # You might want to detect this automatically
                 "brep_files": {
-                    "path": file_path
+                    "brep_string": part_dto.brep_string
                 },
-                "name": label,
+                "name": part_dto.label,
                 "author": author,
                 "description": f"Uploaded from FreeCAD: {label}",
                 "coordinates": {
-                    "x": 0,
-                    "y": 0,
-                    "z": 0
+                    "x": part_dto.coordinates.x,
+                    "y": part_dto.coordinates.y,
+                    "z": part_dto.coordinates.z,
+                    "angle": part_dto.coordinates.angle,
+                    "axis": part_dto.coordinates.axis
                 },
                 "role": "uploaded_part",
                 "role_description": "Part uploaded from active FreeCAD document"
             }
             # Проверяем, существует ли уже объект с таким ID
-            existing_id = getattr(active_doc, 'Id', None)
+            existing_id = part_dto.id
 
             if existing_id:  # Проверяем только если есть ID
                 try:
@@ -188,14 +191,28 @@ class PLMMainWindow(QtWidgets.QWidget):
             data = json.loads(response)
             obj = BasicObject(data)
 
-            if obj.file_path:
-                QtWidgets.QMessageBox.information(self, 'Success', f'Part found: {obj.file_path}')
-                try:
-                    CADUtils.open_file(obj.file_path)
-                except Exception as e:
-                    QtWidgets.QMessageBox.critical(self, 'Error', str(e))
-            else:
-                QtWidgets.QMessageBox.critical(self, 'Error', 'Object found, but no file path available!')
+            if obj.brep_string:
+                active_doc = CADUtils.get_active_doc()
+                if not active_doc:
+                    CADUtils.create_new_doc(f"Document_{part_id}")
 
+                part_dto = PartCreationDTO(
+                    brep_string=obj.brep_string,
+                    id=obj.id,
+                    label=obj.name,
+                    coordinates=Coordinates(
+                        x=obj.coordinates["x"],
+                        y=obj.coordinates["y"],
+                        z=obj.coordinates["z"],
+                        angle=obj.coordinates["angle"],
+                        axis=obj.coordinates["axis"]
+                    )
+                )
+
+                new_part = CADUtils.create_part_with_brep(part_dto)
+
+                QtWidgets.QMessageBox.information(self, 'Success', f'Part "{new_part.Label}" loaded successfully.')
+            else:
+                QtWidgets.QMessageBox.critical(self, 'Error', 'Object found, but no BREP data available!')
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred while loading the object: {str(e)}')
