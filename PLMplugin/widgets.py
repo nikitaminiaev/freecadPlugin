@@ -1,4 +1,4 @@
-from PySide2 import QtWidgets
+from PySide2 import QtWidgets, QtCore
 
 class ObjectTreeWidget(QtWidgets.QTreeWidget):
     def __init__(self, parent=None):
@@ -38,6 +38,8 @@ class ObjectTreeWidget(QtWidgets.QTreeWidget):
             str(obj.name),
             str(obj.id)
         ])
+
+        item.setData(0, QtCore.Qt.UserRole, obj.id)
 
         if parent_item is None:
             self.addTopLevelItem(item)

@@ -93,10 +93,17 @@ class CADUtils:
             raise Exception(f"Failed to create new file in FreeCAD: {str(e)}")
 
     @staticmethod
-    def save_id(active_doc, id):
+    def close_active_doc():
+        try:
+            import FreeCAD
+            FreeCAD.closeDocument(FreeCAD.ActiveDocument.Name)
+        except Exception as e:
+            pass
+
+    @staticmethod
+    def set_id(active_doc, id):
         try:
             active_doc.Id = id
-            active_doc.save()
         except Exception as e:
             raise Exception(f'File uploaded but failed to save ID to document: {str(e)}')
 

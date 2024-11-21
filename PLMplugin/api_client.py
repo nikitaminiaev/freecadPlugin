@@ -62,7 +62,9 @@ class APIClient:
 
             if response.status == 200:
                 data = response.read()
-                return data.decode("utf-8")
+                decode = data.decode("utf-8")
+                print(decode)
+                return decode
             else:
                 print(f"Error response: {response.status} {response.reason}")
                 return json.dumps({"error": f"HTTP {response.status}: {response.reason}"})

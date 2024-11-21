@@ -1,6 +1,6 @@
 import json
 
-from PySide2 import QtWidgets
+from PySide2 import QtWidgets, QtCore
 
 from cad_utils import CADUtils, PartCreationDTO, Coordinates
 from models import BasicObject
@@ -11,6 +11,7 @@ from api_client import APIClient
 class PLMMainWindow(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
+        self.last_opened_obj_ids = []
         self.api_client = APIClient()
         self.setup_ui()
 
@@ -28,6 +29,16 @@ class PLMMainWindow(QtWidgets.QWidget):
         self.findAllButton = QtWidgets.QPushButton('Find All')
         self.uploadActiveButton = QtWidgets.QPushButton('Save')
 
+        # New buttons
+        self.goToSupersystemButton = QtWidgets.QPushButton('To Supersystem')
+        self.goToSubsystemButton = QtWidgets.QPushButton('To Subsystem')
+        self.loadInCurrentDocButton = QtWidgets.QPushButton('Load to Current Doc')
+
+        # Connect new buttons to methods
+        self.goToSupersystemButton.clicked.connect(self.go_to_supersystem)
+        self.goToSubsystemButton.clicked.connect(self.go_to_subsystem)
+        self.loadInCurrentDocButton.clicked.connect(self.load_in_current_doc)
+
         self.submitButton.clicked.connect(self.search_part)
         self.findAllButton.clicked.connect(self.find_all_parts)
         self.uploadActiveButton.clicked.connect(self.upload_active_part)
@@ -37,6 +48,9 @@ class PLMMainWindow(QtWidgets.QWidget):
         search_layout.addWidget(self.submitButton)
         search_layout.addWidget(self.findAllButton)
         search_layout.addWidget(self.uploadActiveButton)
+        search_layout.addWidget(self.goToSupersystemButton)
+        search_layout.addWidget(self.goToSubsystemButton)
+        search_layout.addWidget(self.loadInCurrentDocButton)
         layout.addLayout(search_layout)
 
         # Tree widget
@@ -144,7 +158,7 @@ class PLMMainWindow(QtWidgets.QWidget):
                 self.resultsTree.display_hierarchical_results(
                     objects if isinstance(objects, list) else [objects],
                     is_search_result=True,
-                    load_callback=self.load_object
+                    load_callback=self.load_object_in_new_doc
                 )
             else:
                 self.resultsTree.clear()
@@ -168,7 +182,7 @@ class PLMMainWindow(QtWidgets.QWidget):
                 self.resultsTree.display_hierarchical_results(
                     objects,
                     is_search_result=False,
-                    load_callback=self.load_object
+                    load_callback=self.load_object_in_new_doc
                 )
             else:
                 self.resultsTree.clear()
@@ -178,36 +192,154 @@ class PLMMainWindow(QtWidgets.QWidget):
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
             self.resultsTree.clear()
 
-    def load_object(self, part_id):
+    def go_to_subsystem(self):
         try:
+            try:
+                active_doc = CADUtils.get_active_doc()
+                obj_id = active_doc.Id
+            except:
+                obj_id = self.get_object_id_from_plm_select()
+
+            if obj_id is None:
+                QtWidgets.QMessageBox.information(self, 'Info', 'Please select any object')
+                return
+
             response = self.api_client.send_get_request(
-                "/api/basic_object/{id}",
-                path_params={"id": part_id}
+                "/api/basic_object/{id}/children",
+                path_params={"id": obj_id}
             )
-            data = json.loads(response)
-            obj = BasicObject(data)
+            children = json.loads(response)
 
-            if obj.brep_string:
-                try:
-                    CADUtils.get_active_doc()
-                except:
-                    CADUtils.create_new_doc(f"Document_{part_id}")
+            if isinstance(children, list) and len(children) > 0:
+                if len(children) == 1:
+                    # If only one subsystem, load it directly
+                    self.load_object_in_new_doc(children[0]['id'])
+                else:
+                    # If multiple subsystems, show a selection dialog
+                    dialog = QtWidgets.QDialog(self)
+                    dialog.setWindowTitle('Select Subsystem')
+                    layout = QtWidgets.QVBoxLayout()
 
-                part_dto = PartCreationDTO(
-                    brep_string=obj.brep_string,
-                    id=obj.id,
-                    label=obj.name,
-                    coordinates=Coordinates(
-                        x=obj.coordinates["x"],
-                        y=obj.coordinates["y"],
-                        z=obj.coordinates["z"],
-                        angle=obj.coordinates["angle"],
-                        axis=obj.coordinates["axis"]
+                    subsystem_list = QtWidgets.QListWidget()
+                    for subsystem in children:
+                        subsystem_list.addItem(subsystem['name'])
+
+                    layout.addWidget(subsystem_list)
+
+                    buttons = QtWidgets.QDialogButtonBox(
+                        QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
                     )
-                )
+                    buttons.accepted.connect(dialog.accept)
+                    buttons.rejected.connect(dialog.reject)
+                    layout.addWidget(buttons)
 
-                CADUtils.create_part_with_brep(part_dto)
+                    dialog.setLayout(layout)
+
+                    if dialog.exec_() == QtWidgets.QDialog.Accepted:
+                        selected_index = subsystem_list.currentRow()
+                        self.load_object_in_new_doc(children[selected_index]['id'])
             else:
-                QtWidgets.QMessageBox.critical(self, 'Error', 'Object found, but no BREP data available!')
+                QtWidgets.QMessageBox.information(self, 'Info', 'No subsystems found for this object.')
+
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
+
+    def go_to_supersystem(self):
+        """Navigate to the supersystem of the current object"""
+        try:
+            active_doc = CADUtils.get_active_doc()
+            # todo дописать
+            obj_id = self.get_object_id_from_plm_select()
+
+            # Fetch the parents of the object
+            response = self.api_client.send_get_request(
+                "/api/basic_object/{id}/parents",
+                path_params={"id": obj_id}
+            )
+            parent_ids = json.loads(response)
+
+            if not parent_ids:
+                QtWidgets.QMessageBox.information(self, 'Info', 'No parents found for this object.')
+                return
+
+            for parent_id in parent_ids:
+                if parent_id in self.last_opened_obj_ids:
+                    self.load_object_in_new_doc(parent_id)
+                    return
+
+            # # If no parent from last opened objects is found, load the first parent
+            # self.load_object_in_new_doc(parent_ids[0])
+
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
+
+    def get_object_id_from_plm_select(self):
+        selected_objects = self.resultsTree.selectedItems()
+        if not selected_objects:
+            QtWidgets.QMessageBox.warning(self, 'Warning', 'Please select an object first!')
+            return None
+        selected_item = selected_objects[0]
+        obj_id = selected_item.data(0, QtCore.Qt.UserRole)
+
+        return obj_id
+
+    def load_in_current_doc(self):
+        try:
+            obj_id = self.get_object_id_from_plm_select()
+            if obj_id is None:
+                QtWidgets.QMessageBox.critical(self, 'Info', f'Please select any object')
+            # CADUtils.get_active_doc()
+            self.load_object_in_same_doc(obj_id)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
+
+    def load_object_in_new_doc(self, obj_id):
+        try:
+            CADUtils.close_active_doc()
+            active_doc = CADUtils.create_new_doc(f"Document_{obj_id}")
+
+            self._load_object(obj_id)
+            CADUtils.set_id(active_doc, obj_id)
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred while loading the object: {str(e)}')
+
+        self.last_opened_obj_ids.append(obj_id)
+
+    def load_object_in_same_doc(self, obj_id):
+        try:
+            try:
+                CADUtils.get_active_doc()
+            except:
+                QtWidgets.QMessageBox.critical(self, 'Error', 'no active doc!')
+                return
+
+            self._load_object(obj_id)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred while loading the object: {str(e)}')
+
+        self.last_opened_obj_ids.append(obj_id)
+
+    def _load_object(self, obj_id):
+        response = self.api_client.send_get_request(
+            "/api/basic_object/{id}",
+            path_params={"id": obj_id}
+        )
+        data = json.loads(response)
+        obj = BasicObject(data)
+        if obj.brep_string:
+            part_dto = PartCreationDTO(
+                brep_string=obj.brep_string,
+                id=obj.id,
+                label=obj.name,
+                coordinates=Coordinates(
+                    x=obj.coordinates["x"],
+                    y=obj.coordinates["y"],
+                    z=obj.coordinates["z"],
+                    angle=obj.coordinates["angle"],
+                    axis=obj.coordinates["axis"]
+                )
+            )
+
+            CADUtils.create_part_with_brep(part_dto)
+        else:
+            QtWidgets.QMessageBox.critical(self, 'Error', 'Object found, but no BREP data available!')
