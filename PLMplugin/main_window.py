@@ -195,8 +195,8 @@ class PLMMainWindow(QtWidgets.QWidget):
     def go_to_subsystem(self):
         try:
             try:
-                active_doc = CADUtils.get_active_doc()
-                obj_id = active_doc.Id
+                CADUtils.get_active_doc()
+                obj_id = CADUtils.get_all_selected_obj()[0].Id
             except:
                 obj_id = self.get_object_id_from_plm_select()
 
@@ -204,62 +204,31 @@ class PLMMainWindow(QtWidgets.QWidget):
                 QtWidgets.QMessageBox.information(self, 'Info', 'Please select any object')
                 return
 
-            response = self.api_client.send_get_request(
-                "/api/basic_object/{id}/children",
-                path_params={"id": obj_id}
-            )
-            children = json.loads(response)
-
-            if isinstance(children, list) and len(children) > 0:
-                if len(children) == 1:
-                    # If only one subsystem, load it directly
-                    self.load_object_in_new_doc(children[0]['id'])
-                else:
-                    # If multiple subsystems, show a selection dialog
-                    dialog = QtWidgets.QDialog(self)
-                    dialog.setWindowTitle('Select Subsystem')
-                    layout = QtWidgets.QVBoxLayout()
-
-                    subsystem_list = QtWidgets.QListWidget()
-                    for subsystem in children:
-                        subsystem_list.addItem(subsystem['name'])
-
-                    layout.addWidget(subsystem_list)
-
-                    buttons = QtWidgets.QDialogButtonBox(
-                        QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
-                    )
-                    buttons.accepted.connect(dialog.accept)
-                    buttons.rejected.connect(dialog.reject)
-                    layout.addWidget(buttons)
-
-                    dialog.setLayout(layout)
-
-                    if dialog.exec_() == QtWidgets.QDialog.Accepted:
-                        selected_index = subsystem_list.currentRow()
-                        self.load_object_in_new_doc(children[selected_index]['id'])
-            else:
-                QtWidgets.QMessageBox.information(self, 'Info', 'No subsystems found for this object.')
-
+            self.load_object_in_new_doc(obj_id)
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
 
     def go_to_supersystem(self):
-        """Navigate to the supersystem of the current object"""
         try:
-            active_doc = CADUtils.get_active_doc()
-            # todo дописать
-            obj_id = self.get_object_id_from_plm_select()
+            try:
+                CADUtils.get_active_doc()
+                obj_id = CADUtils.get_all_selected_obj()[0].Id
+            except:
+                obj_id = self.get_object_id_from_plm_select()
 
             # Fetch the parents of the object
             response = self.api_client.send_get_request(
-                "/api/basic_object/{id}/parents",
+                "/api/basic_object/{id}/parent_ids",
                 path_params={"id": obj_id}
             )
             parent_ids = json.loads(response)
 
-            if not parent_ids:
+            if not parent_ids or len(parent_ids) == 0:
                 QtWidgets.QMessageBox.information(self, 'Info', 'No parents found for this object.')
+                return
+
+            if len(parent_ids) == 1:
+                self.load_object_in_new_doc(parent_ids[0])
                 return
 
             for parent_id in parent_ids:
@@ -267,8 +236,7 @@ class PLMMainWindow(QtWidgets.QWidget):
                     self.load_object_in_new_doc(parent_id)
                     return
 
-            # # If no parent from last opened objects is found, load the first parent
-            # self.load_object_in_new_doc(parent_ids[0])
+            #todo далее кейс когда надо показывать окно с выбором парента
 
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
@@ -319,13 +287,19 @@ class PLMMainWindow(QtWidgets.QWidget):
 
         self.last_opened_obj_ids.append(obj_id)
 
-    def _load_object(self, obj_id):
+    def _load_object(self, obj_id, max_depth=1):
         response = self.api_client.send_get_request(
             "/api/basic_object/{id}",
             path_params={"id": obj_id}
         )
         data = json.loads(response)
         obj = BasicObject(data)
+
+        if max_depth > 0 and hasattr(obj, 'children') and obj.children:
+            for child_id in obj.children:
+                self._load_object(child_id, max_depth - 1)
+            return
+
         if obj.brep_string:
             part_dto = PartCreationDTO(
                 brep_string=obj.brep_string,
