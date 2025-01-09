@@ -129,12 +129,20 @@ class CADUtils:
             part_obj.Group = [body_obj]
             CADUtils._set_object_properties(part_obj, data)
 
-            doc.recompute()
-            Gui.SendMsgToActiveView("ViewFit")
-
             return part_obj
         except Exception as e:
             raise Exception(f'Failed to create part with BREP: {str(e)}')
+    
+    @staticmethod
+    def recompute_doc():
+        try:
+            import FreeCAD
+            import FreeCADGui as Gui
+            doc = FreeCAD.ActiveDocument
+            doc.recompute()
+            Gui.SendMsgToActiveView("ViewFit")
+        except Exception as e:
+            raise Exception(f'Failed to recompute document: {str(e)}')
 
     @staticmethod
     def _set_object_properties(obj, data: PartCreationDTO) -> None:

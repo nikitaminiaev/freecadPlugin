@@ -267,6 +267,7 @@ class PLMMainWindow(QtWidgets.QWidget):
             active_doc = CADUtils.create_new_doc(f"Document_{obj_id}")
 
             self._load_object(obj_id)
+            CADUtils.recompute_doc()
             CADUtils.set_id(active_doc, obj_id)
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred while loading the object: {str(e)}')
@@ -282,6 +283,7 @@ class PLMMainWindow(QtWidgets.QWidget):
                 return
 
             self._load_object(obj_id)
+            CADUtils.recompute_doc()
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred while loading the object: {str(e)}')
 
