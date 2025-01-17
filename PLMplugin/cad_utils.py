@@ -207,6 +207,15 @@ class CADUtils:
             raise Exception(f'Failed to select obj: {str(e)}')
 
     @staticmethod
+    def get_obj_count():
+        try:
+            import FreeCAD
+            doc = FreeCAD.ActiveDocument
+            return len(doc.Objects)
+        except Exception as e:
+            raise Exception(f'Failed to get obj count: {str(e)}')
+
+    @staticmethod
     def create_dto_from_object(obj) -> PartCreationDTO:
         """Create PartCreationDTO from existing FreeCAD object
 

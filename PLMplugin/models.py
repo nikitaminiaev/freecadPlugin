@@ -5,18 +5,14 @@ class BasicObject:
         self.children = data.get('children', [])
         self.parents = data.get('parents', [])
 
-        # Add coordinates field
-        coordinates = data.get('coordinates', {})
+        # Обработка случая, когда coordinates равно None
+        coordinates = data.get('coordinates') or {}
         self.coordinates = {
             "x": coordinates.get('x', 0.0),
             "y": coordinates.get('y', 0.0),
             "z": coordinates.get('z', 0.0),
             "angle": coordinates.get('angle', 0.0),
-            "axis": {
-                "x": coordinates.get('axis', {}).get('x', 0.0),
-                "y": coordinates.get('axis', {}).get('y', 0.0),
-                "z": coordinates.get('axis', {}).get('z', 0.0)
-            }
+            "axis": coordinates.get('axis', {}) or {"x": 0.0, "y": 0.0, "z": 0.0}
         }
         # Handle case where bounding_contour is None
         bounding_contour = data.get('bounding_contour', {})
@@ -34,6 +30,9 @@ class BasicObject:
 
     @classmethod
     def from_response(cls, response_data):
+        if not response_data:
+            return None
+            
         if isinstance(response_data, list):
             return [cls(obj) for obj in response_data]
         elif isinstance(response_data, dict):

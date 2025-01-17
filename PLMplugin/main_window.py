@@ -70,7 +70,7 @@ class PLMMainWindow(QtWidgets.QWidget):
             selected_obj = selected_objs[0]
             part_dto = CADUtils.create_dto_from_object(selected_obj)
             label = part_dto.label.encode().decode('utf-8')
-
+            # todo если в фале больше 1 объекта то нажно сохранять coordinates для парента
             payload = {
                 "is_assembly": False,  # You might want to detect this automatically
                 "brep_files": {
@@ -149,9 +149,11 @@ class PLMMainWindow(QtWidgets.QWidget):
             response = self.api_client.send_get_request("/api/basic_object", query_params={"name": part_name})
             data = json.loads(response)
 
-            if isinstance(data, dict) and 'error' in data:
-                QtWidgets.QMessageBox.critical(self, 'Error', str(data['error']))
-                return
+            if isinstance(data, dict):
+                error_msg = data.get('error') or data.get('error_message')
+                if error_msg:
+                    QtWidgets.QMessageBox.critical(self, 'Ошибка', str(error_msg))
+                    return
 
             objects = BasicObject.from_response(data)
             if objects:
