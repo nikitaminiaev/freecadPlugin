@@ -207,15 +207,6 @@ class CADUtils:
             raise Exception(f'Failed to select obj: {str(e)}')
 
     @staticmethod
-    def get_obj_count():
-        try:
-            import FreeCAD
-            doc = FreeCAD.ActiveDocument
-            return len(doc.Objects)
-        except Exception as e:
-            raise Exception(f'Failed to get obj count: {str(e)}')
-
-    @staticmethod
     def create_dto_from_object(obj) -> PartCreationDTO:
         """Create PartCreationDTO from existing FreeCAD object
 
@@ -258,3 +249,35 @@ class CADUtils:
 
         except Exception as e:
             raise Exception(f'Failed to create DTO from object: {str(e)}')
+
+    @staticmethod
+    def get_combined_brep_from_objects(objects=None):
+        """Объединяет несколько объектов в один BREP
+
+        Args:
+            objects: Список объектов FreeCAD. Если None, берутся выбранные объекты.
+
+        Returns:
+            str: BREP строка объединенной формы
+
+        Raises:
+            Exception: Если не удалось объединить объекты или получить BREP
+        """
+        try:
+            if objects is None:
+                objects = CADUtils.get_all_selected_obj()
+            
+            if not objects:
+                raise Exception("Не выбрано ни одного объекта")
+                
+            # Получаем формы всех объектов
+            shapes = [obj.Shape for obj in objects]
+            
+            # Объединяем все формы в одну
+            combined_shape = shapes[0].fuse(shapes[1:])
+            
+            # Экспортируем в BREP
+            return combined_shape.exportBrepToString()
+            
+        except Exception as e:
+            raise Exception(f'Не удалось получить объединенный BREP: {str(e)}')

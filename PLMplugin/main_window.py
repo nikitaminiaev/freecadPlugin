@@ -28,6 +28,7 @@ class PLMMainWindow(QtWidgets.QWidget):
         self.submitButton = QtWidgets.QPushButton('Search')
         self.findAllButton = QtWidgets.QPushButton('Find All')
         self.uploadActiveButton = QtWidgets.QPushButton('Save')
+        # self.saveAssemblyCheckbox = QtWidgets.QCheckBox('Save Assembly')
 
         # New buttons
         self.goToSupersystemButton = QtWidgets.QPushButton('To Supersystem')
@@ -48,6 +49,7 @@ class PLMMainWindow(QtWidgets.QWidget):
         search_layout.addWidget(self.submitButton)
         search_layout.addWidget(self.findAllButton)
         search_layout.addWidget(self.uploadActiveButton)
+        # search_layout.addWidget(self.saveAssemblyCheckbox)
         search_layout.addWidget(self.goToSupersystemButton)
         search_layout.addWidget(self.goToSubsystemButton)
         search_layout.addWidget(self.loadInCurrentDocButton)
@@ -62,82 +64,116 @@ class PLMMainWindow(QtWidgets.QWidget):
         try:
             active_doc = CADUtils.get_active_doc()
             author = active_doc.CreatedBy.encode().decode('utf-8')
-
+            doc_id = getattr(active_doc, 'Id', None)
+            comment_str = getattr(active_doc, 'Comment', None)
+            comment = json.loads(comment_str) if comment_str else {}
             selected_objs = CADUtils.get_all_selected_obj()
+
             if not selected_objs:
                 QtWidgets.QMessageBox.warning(self, 'Warning', 'No object selected in FreeCAD!')
                 return
-            selected_obj = selected_objs[0]
-            part_dto = CADUtils.create_dto_from_object(selected_obj)
-            label = part_dto.label.encode().decode('utf-8')
-            # todo если в фале больше 1 объекта то нажно сохранять coordinates для парента
-            payload = {
-                "is_assembly": False,  # You might want to detect this automatically
-                "brep_files": {
-                    "brep_string": part_dto.brep_string
-                },
-                "name": part_dto.label,
-                "author": author,
-                "description": f"Uploaded from FreeCAD: {label}",
-                "coordinates": {
-                    "x": part_dto.coordinates.x,
-                    "y": part_dto.coordinates.y,
-                    "z": part_dto.coordinates.z,
-                    "angle": part_dto.coordinates.angle,
-                    "axis": part_dto.coordinates.axis
-                },
-                "role": "uploaded_part",
-                "role_description": "Part uploaded from active FreeCAD document"
-            }
-            # Проверяем, существует ли уже объект с таким ID
-            existing_id = part_dto.id
+            
+            is_assembly = len(selected_objs) > 1
+            parrent_id = None
 
-            if existing_id:  # Проверяем только если есть ID
+            if is_assembly:
+                parrent_dto = PartCreationDTO(brep_string=CADUtils.get_combined_brep_from_objects(selected_objs), label=active_doc.Label)
+                if doc_id:
+                    parrent_dto.id = doc_id
+                parrent_id = self._upload_single_object(parrent_dto, author, None, is_assembly)
+                if parrent_id:
+                    CADUtils.set_id(active_doc, parrent_id)
+            child_ids = {}
+            for selected_obj in selected_objs:
+                part_dto = CADUtils.create_dto_from_object(selected_obj)
+                if comment:
+                    part_dto.id = comment[part_dto.label]
+                obj_id = self._upload_single_object(part_dto, author, getattr(active_doc, 'Id', None), is_assembly)
+                try:
+                    if hasattr(selected_obj, 'Id'):
+                        selected_obj.Id = obj_id
+                except Exception as e:
+                    QtWidgets.QMessageBox.warning(self, 'Warning',
+                                              f'File uploaded but failed to save ID to document: {str(e)}')
+                if obj_id:
+                    child_ids[part_dto.label] = obj_id
+                    
+            if child_ids:
+                active_doc.Comment = json.dumps(child_ids)
+
+        except ImportError:
+            QtWidgets.QMessageBox.critical(self, 'Error', 'FreeCAD module not available!')
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred while uploading: {str(e)}')
+
+    def _upload_single_object(self, part_dto, author, parent_id, is_assembly):
+        """Upload a single object and return its ID"""
+        label = part_dto.label.encode().decode('utf-8')
+        
+        # Добавляем безопасную обработку координат
+        coordinates = {
+            "x": getattr(part_dto.coordinates, 'x', 0.0) or 0.0,
+            "y": getattr(part_dto.coordinates, 'y', 0.0) or 0.0,
+            "z": getattr(part_dto.coordinates, 'z', 0.0) or 0.0,
+            "angle": getattr(part_dto.coordinates, 'angle', 0.0) or 0.0,
+            "axis": getattr(part_dto.coordinates, 'axis', {"x": 0.0, "y": 0.0, "z": 0.0}) or {"x": 0.0, "y": 0.0, "z": 0.0}
+        }
+
+        payload = {
+            "is_assembly": is_assembly,
+            "brep_files": {
+                "brep_string": part_dto.brep_string
+            },
+            "name": label,
+            "author": author,
+            "description": f"Uploaded from FreeCAD: {label}",
+            "coordinates": coordinates,  # Используем обработанные координаты
+            "role": "uploaded_part",
+            "role_description": "Part uploaded from active FreeCAD document"
+        }
+
+        if parent_id:
+            payload["parent_id"] = parent_id
+
+        existing_id = part_dto.id
+
+        try:
+            if existing_id:
                 try:
                     self.api_client.send_get_request(
                         "/api/basic_object/{id}",
                         path_params={"id": existing_id}
                     )
-                    # Если объект существует, используем PATCH запрос
                     response = self.api_client.send_patch_request(
                         f"/api/basic_object/{existing_id}",
                         payload
                     )
                 except Exception:
-                    # Если получили 404 или другую ошибку при поиске, создаем новый объект
                     response = self.api_client.send_post_request(
                         "/api/basic_object/",
                         payload
                     )
             else:
-                # Если ID нет, сразу создаем новый объект
                 response = self.api_client.send_post_request(
                     "/api/basic_object/",
                     payload
                 )
 
             data = json.loads(response)
-            print(data)
             if isinstance(data, dict):
                 if 'error' in data:
                     QtWidgets.QMessageBox.critical(self, 'Error', str(data['error']))
-                    return
+                    return None
 
                 if 'id' not in data:
                     QtWidgets.QMessageBox.critical(self, 'Error', 'Server response missing object ID')
-                    return
+                    return None
 
-                try:
-                    if hasattr(selected_obj, 'Id'):
-                        selected_obj.Id = data['id']
-                except Exception as e:
-                    QtWidgets.QMessageBox.warning(self, 'Warning',
-                                                  f'File uploaded but failed to save ID to document: {str(e)}')
-
-        except ImportError:
-            QtWidgets.QMessageBox.critical(self, 'Error', 'FreeCAD module not available!')
+                return data['id']
+            return None
         except Exception as e:
-            QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred while uploading: {str(e)}')
+            QtWidgets.QMessageBox.critical(self, 'Error', f'Error uploading object: {str(e)}')
+            return None
 
     def search_part(self):
         part_name = self.textInput.text()
