@@ -21,14 +21,36 @@ class PLMMainWindow(QtWidgets.QWidget):
 
         layout = QtWidgets.QVBoxLayout(self)
 
+        # Count display area
+        count_layout = QtWidgets.QHBoxLayout()
+        self.count_label = QtWidgets.QLabel('Total objects:')
+        self.count_display = QtWidgets.QLabel('NaN')
+        count_layout.addWidget(self.count_label)
+        count_layout.addWidget(self.count_display)
+        count_layout.addStretch()
+        layout.addLayout(count_layout)
+        self.update_objects_count()  # Вызываем метод сразу после создания виджетов
+
         # Search area
         search_layout = QtWidgets.QHBoxLayout()
         self.label = QtWidgets.QLabel('Enter Obj Name:')
         self.textInput = QtWidgets.QLineEdit()
+        
+        # Добавляем поля для limit и offset
+        limit_layout = QtWidgets.QHBoxLayout()
+        self.limit_label = QtWidgets.QLabel('Limit:')
+        self.limit_input = QtWidgets.QLineEdit('10')  # значение по умолчанию
+        self.offset_label = QtWidgets.QLabel('Offset:')
+        self.offset_input = QtWidgets.QLineEdit('0')  # значение по умолчанию
+        
+        limit_layout.addWidget(self.limit_label)
+        limit_layout.addWidget(self.limit_input)
+        limit_layout.addWidget(self.offset_label)
+        limit_layout.addWidget(self.offset_input)
+        
         self.submitButton = QtWidgets.QPushButton('Search')
         self.findAllButton = QtWidgets.QPushButton('Find All')
         self.uploadActiveButton = QtWidgets.QPushButton('Save')
-        # self.saveAssemblyCheckbox = QtWidgets.QCheckBox('Save Assembly')
 
         # New buttons
         self.goToSupersystemButton = QtWidgets.QPushButton('To Supersystem')
@@ -49,15 +71,27 @@ class PLMMainWindow(QtWidgets.QWidget):
         search_layout.addWidget(self.submitButton)
         search_layout.addWidget(self.findAllButton)
         search_layout.addWidget(self.uploadActiveButton)
-        # search_layout.addWidget(self.saveAssemblyCheckbox)
         search_layout.addWidget(self.goToSupersystemButton)
         search_layout.addWidget(self.goToSubsystemButton)
         search_layout.addWidget(self.loadInCurrentDocButton)
         layout.addLayout(search_layout)
+        layout.addLayout(limit_layout)  # Добавляем новый layout после search_layout
 
         # Tree widget
         self.resultsTree = ObjectTreeWidget()
         layout.addWidget(self.resultsTree)
+
+    def update_objects_count(self):
+        """Update the total objects count display"""
+        try:
+            count_response = self.api_client.send_get_request("/api/basic_objects/count")
+            try:
+                count = json.loads(count_response)
+                self.count_display.setText(str(count))
+            except:
+                self.count_display.setText('NaN')
+        except:
+            self.count_display.setText('NaN')
 
     def upload_active_part(self):
         """Upload currently active file to the server"""
@@ -208,7 +242,20 @@ class PLMMainWindow(QtWidgets.QWidget):
 
     def find_all_parts(self):
         try:
-            response = self.api_client.send_get_request("/api/basic_objects")
+            # Получаем значения из полей ввода
+            try:
+                limit = int(self.limit_input.text())
+                offset = int(self.offset_input.text())
+            except ValueError:
+                # Если введены некорректные значения, используем значения по умолчанию
+                limit = 10
+                offset = 0
+                self.limit_input.setText(str(limit))
+                self.offset_input.setText(str(offset))
+                QtWidgets.QMessageBox.warning(self, 'Warning', 'Invalid limit/offset values. Using defaults.')
+
+            response = self.api_client.send_get_request("/api/basic_objects", 
+                                                      query_params={"limit": limit, "offset": offset})
             data = json.loads(response)
 
             if isinstance(data, dict) and 'error' in data:

@@ -1,5 +1,6 @@
 import json
 import http.client
+import time
 
 class APIClient:
     def __init__(self, host="localhost", port=8000):
@@ -14,6 +15,7 @@ class APIClient:
             url: Request URL
             payload: Dictionary to be sent as JSON payload
         """
+        start_time = time.time()
         conn = http.client.HTTPConnection(self.host, port=self.port)
 
         try:
@@ -22,8 +24,6 @@ class APIClient:
             }
 
             json_payload = json.dumps(payload)
-            print(f"Sending {method} to URL: {url}")
-            print(f"Payload: {json_payload}")
 
             conn.request(method, url, body=json_payload, headers=headers)
             response = conn.getresponse()
@@ -42,6 +42,8 @@ class APIClient:
 
         finally:
             conn.close()
+            end_time = time.time()
+            print(f"Total db time: {end_time - start_time:.2f} seconds")
 
     def send_post_request(self, url: str, payload: dict):
         return self._send_request_with_body("POST", url, payload)
@@ -50,6 +52,8 @@ class APIClient:
         return self._send_request_with_body("PATCH", url, payload)
 
     def send_get_request(self, url_template: str, path_params: dict = None, query_params: dict = None):
+        start_time = time.time()
+        
         conn = http.client.HTTPConnection(self.host, port=self.port)
 
         try:
@@ -63,7 +67,6 @@ class APIClient:
             if response.status == 200:
                 data = response.read()
                 decode = data.decode("utf-8")
-                print(decode)
                 return decode
             else:
                 print(f"Error response: {response.status} {response.reason}")
@@ -75,6 +78,8 @@ class APIClient:
 
         finally:
             conn.close()
+            end_time = time.time()
+            print(f"Total db time: {end_time - start_time:.2f} seconds")
 
     def _build_url(self, url_template: str, path_params: dict = None, query_params: dict = None) -> str:
         if path_params:
