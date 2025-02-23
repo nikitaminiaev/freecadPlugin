@@ -17,7 +17,7 @@ class ObjectTreeWidget(QtWidgets.QTreeWidget):
         header.setSectionResizeMode(2, QtWidgets.QHeaderView.Stretch)
 
         self.setColumnWidth(0, 240)
-        self.setColumnWidth(1, 240)
+        self.setColumnWidth(1, 270)
 
         self.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
 
@@ -45,6 +45,16 @@ class ObjectTreeWidget(QtWidgets.QTreeWidget):
             self.addTopLevelItem(item)
         else:
             parent_item.addChild(item)
+
+        # Создаем QLineEdit для отображения имени
+        name_line_edit = QtWidgets.QLineEdit(str(obj.name))
+        name_line_edit.setReadOnly(True)  # Делаем поле только для чтения
+        self.setItemWidget(item, 0, name_line_edit)
+
+        # Создаем QLineEdit для отображения ID
+        id_line_edit = QtWidgets.QLineEdit(str(obj.id))
+        id_line_edit.setReadOnly(True)  # Делаем поле только для чтения
+        self.setItemWidget(item, 1, id_line_edit)
 
         button_widget = self._create_button_widget(obj.id, load_callback)
         self.setItemWidget(item, 2, button_widget)
