@@ -79,6 +79,7 @@ class PLMMainWindow(QtWidgets.QWidget):
 
         # Tree widget
         self.resultsTree = ObjectTreeWidget()
+        self.resultsTree.api_client = self.api_client
         layout.addWidget(self.resultsTree)
 
     def update_objects_count(self):
@@ -254,7 +255,7 @@ class PLMMainWindow(QtWidgets.QWidget):
                 self.offset_input.setText(str(offset))
                 QtWidgets.QMessageBox.warning(self, 'Warning', 'Invalid limit/offset values. Using defaults.')
 
-            response = self.api_client.send_get_request("/api/basic_objects", 
+            response = self.api_client.send_get_request("/api/basic_objects/top_level", 
                                                       query_params={"limit": limit, "offset": offset})
             data = json.loads(response)
 

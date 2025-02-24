@@ -2,8 +2,8 @@ class BasicObject:
     def __init__(self, data: dict):
         self.id = data.get('id')
         self.name = data.get('name', 'N/A')
-        self.children = data.get('children', [])
-        self.parents = data.get('parents', [])
+        self.children: list[str] = data.get('children', [])
+        self.parents: list[str] = data.get('parents', [])
 
         # Обработка случая, когда coordinates равно None
         coordinates = data.get('coordinates') or {}

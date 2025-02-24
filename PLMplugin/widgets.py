@@ -1,9 +1,14 @@
 from PySide2 import QtWidgets, QtCore
+from models import BasicObject
+import json
 
 class ObjectTreeWidget(QtWidgets.QTreeWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.api_client = None
+        self.load_callback = None  # Добавляем атрибут
         self.setup_ui()
+        self.itemExpanded.connect(self.on_item_expanded)
 
     def setup_ui(self):
         headers = ['Name', 'ID', 'Actions']
@@ -23,6 +28,7 @@ class ObjectTreeWidget(QtWidgets.QTreeWidget):
 
     def display_hierarchical_results(self, objects, is_search_result=False, load_callback=None):
         self.clear()
+        self.load_callback = load_callback  # Сохраняем callback
         objects_dict = {obj.id: obj for obj in objects}
 
         if is_search_result:
@@ -59,10 +65,16 @@ class ObjectTreeWidget(QtWidgets.QTreeWidget):
         button_widget = self._create_button_widget(obj.id, load_callback)
         self.setItemWidget(item, 2, button_widget)
 
+        # Рекурсивное добавление дочерних элементов
         for child_id in obj.children:
             child_obj = objects_dict.get(child_id)
-            if child_obj:
-                self._add_object_to_tree(child_obj, objects_dict, item, load_callback)
+            if not child_obj:
+                child_obj = BasicObject({
+                    'id': child_id,
+                    'children': [],
+                    'parents': [obj.id]
+                })
+            self._add_object_to_tree(child_obj, objects_dict, item, load_callback)
 
     def _create_button_widget(self, part_id, load_callback=None):
         button_widget = QtWidgets.QWidget()
@@ -76,3 +88,40 @@ class ObjectTreeWidget(QtWidgets.QTreeWidget):
         button_layout.addWidget(load_button)
 
         return button_widget
+
+    def on_item_expanded(self, item):
+        # Проверяем, загружены ли уже дети
+        if item.data(0, QtCore.Qt.UserRole + 1):  # Используем дополнительную роль для флага
+            return
+        
+        obj_id = item.data(0, QtCore.Qt.UserRole)
+        
+        # Показываем индикатор загрузки
+        loading_item = QtWidgets.QTreeWidgetItem(["Loading...", "", ""])
+        item.addChild(loading_item)
+        
+        try:
+            # Получаем данные о детях объекта
+            response = self.api_client.send_get_request(
+                "/api/basic_objects/{id}/children",
+                path_params={"id": obj_id}
+            )
+            data = json.loads(response)
+            children = BasicObject.from_response(data)
+            
+            # Удаляем индикатор загрузки вместе с остальными дочерними элементами
+            item.takeChildren()
+            
+            # Добавляем новые элементы
+            if children:
+                objects_dict = {obj.id: obj for obj in children}
+                for child in children:
+                    self._add_object_to_tree(child, objects_dict, item, self.load_callback)
+            
+            # Помечаем, что дети загружены
+            item.setData(0, QtCore.Qt.UserRole + 1, True)
+        except Exception as e:
+            item.takeChildren()
+            error_item = QtWidgets.QTreeWidgetItem(["Error loading children", "", ""])
+            item.addChild(error_item)
+            print(f"Error loading children for object {obj_id}: {str(e)}")
