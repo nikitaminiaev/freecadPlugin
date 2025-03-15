@@ -4,6 +4,7 @@ import os
 import struct
 import random
 import time
+import json
 
 def create_websocket_client(host, port):
     # Установление TCP-соединения
@@ -78,31 +79,41 @@ def create_websocket_client(host, port):
             has_mask = (header[1] & 0x80) != 0
             length = header[1] & 0x7F
             
+            # Добавляем отладочное сообщение
+            print(f"WebSocket заголовок: fin={fin}, opcode={opcode}, has_mask={has_mask}, length={length}")
+            
             # Получаем расширенную длину, если необходимо
             if length == 126:
                 length_bytes = sock.recv(2)
                 length = struct.unpack('!H', length_bytes)[0]
+                print(f"Расширенная длина (16 бит): {length}")
             elif length == 127:
                 length_bytes = sock.recv(8)
                 length = struct.unpack('!Q', length_bytes)[0]
+                print(f"Расширенная длина (64 бит): {length}")
                 
             # Получаем маску, если она есть (для сервера)
             mask = None
             if has_mask:
                 mask = sock.recv(4)
+                print(f"Получена маска: {mask.hex()}")
                 
             # Получаем данные
             payload = bytearray()
             remaining = length
+            print(f"Ожидаем получение {length} байт данных")
             while remaining > 0:
                 chunk = sock.recv(min(remaining, 4096))
                 if not chunk:
+                    print("Соединение закрыто до получения всех данных")
                     break
                 payload.extend(chunk)
                 remaining -= len(chunk)
+                print(f"Получено {len(chunk)} байт, осталось {remaining} байт")
                 
             # Демаскируем данные, если необходимо
             if has_mask and mask:
+                print("Демаскируем данные")
                 for i in range(len(payload)):
                     payload[i] ^= mask[i % 4]
                     
@@ -110,14 +121,27 @@ def create_websocket_client(host, port):
             if opcode == 1:  # Текстовый фрейм
                 try:
                     result = payload.decode('utf-8')
+                    print(f"Декодировано как UTF-8: {result}")
+                    
+                    # Проверяем, является ли сообщение JSON
+                    try:
+                        json_data = json.loads(result)
+                        print(f"Сообщение является JSON: {json_data}")
+                        if isinstance(json_data, dict) and 'python_code' in json_data:
+                            print(f"Найден ключ python_code: {json_data['python_code']}")
+                    except json.JSONDecodeError:
+                        print("Сообщение не является JSON")
+                    
                     return result
-                except UnicodeDecodeError:
+                except UnicodeDecodeError as e:
+                    print(f"Ошибка декодирования UTF-8: {e}")
                     return None
             elif opcode == 8:  # Закрытие соединения
                 print("Сервер закрыл соединение")
                 sock.close()
                 return None
             else:
+                print(f"Получен бинарный фрейм с opcode={opcode}")
                 return payload
         except Exception as e:
             print(f"Ошибка при получении сообщения: {e}")
