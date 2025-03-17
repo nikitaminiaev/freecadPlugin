@@ -16,30 +16,7 @@
 }
 ```
 
-### 2. JSON с командой
-
-```json
-{
-  "command": "create_part",
-  "params": {
-    "brep_string": "... BREP данные ...",
-    "label": "Моя деталь",
-    "coordinates": {
-      "x": 0.0,
-      "y": 0.0,
-      "z": 0.0,
-      "angle": 0.0,
-      "axis": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 1.0
-      }
-    }
-  }
-}
-```
-
-### 3. Сообщение с префиксом EXEC_PYTHON:
+### 2. Сообщение с префиксом EXEC_PYTHON:
 
 ```
 EXEC_PYTHON:import FreeCAD
@@ -47,7 +24,7 @@ doc = FreeCAD.newDocument('Example')
 # ... остальной код ...
 ```
 
-### 4. Простые команды Python
+### 3. Простые команды Python
 
 Клиент также распознает и выполняет простые команды Python, такие как:
 
@@ -60,17 +37,6 @@ FreeCAD.newDocument('Test')
 ```
 
 Простые команды (длиной менее 50 символов) выполняются автоматически, без запроса подтверждения.
-
-## Поддерживаемые команды
-
-Клиент поддерживает следующие команды:
-
-1. `create_part` - создание новой детали из BREP-данных
-2. `open_file` - открытие файла в FreeCAD
-3. `save_file` - сохранение активного документа в файл
-4. `create_new_document` - создание нового документа
-5. `execute_raw_code` - выполнение произвольного Python-кода
-6. `execute_simple_command` - выполнение простой команды с перехватом вывода
 
 ## Примеры использования
 
@@ -98,10 +64,10 @@ result = {'object_created': cube.Name, 'dimensions': [10, 10, 10]}
 
 ```json
 {
-  "command": "open_file",
-  "params": {
-    "file_path": "/path/to/model.fcstd"
-  }
+  "python_code": "
+import FreeCAD
+FreeCAD.open('/path/to/model.fcstd')
+"
 }
 ```
 
@@ -109,26 +75,22 @@ result = {'object_created': cube.Name, 'dimensions': [10, 10, 10]}
 
 ```json
 {
-  "command": "save_file",
-  "params": {
-    "file_path": "/path/to/output.step",
-    "format_type": "step"
-  }
+  "python_code": "
+import FreeCAD
+import Part
+
+doc = FreeCAD.ActiveDocument
+if doc:
+    # Сохранение в формате FCSTD
+    doc.saveAs('/path/to/output.fcstd')
+    
+    # Или экспорт в STEP
+    Part.export(doc.Objects, '/path/to/output.step')
+"
 }
 ```
 
 ### Выполнение простой команды
-
-```json
-{
-  "command": "execute_simple_command",
-  "params": {
-    "command": "print('Hello from FreeCAD!')"
-  }
-}
-```
-
-Или просто отправить строку:
 
 ```
 print('Hello from FreeCAD!')

@@ -93,50 +93,10 @@ class PLMClientWindow(QtWidgets.QWidget):
         self.messages_display.setReadOnly(True)
         layout.addWidget(self.messages_display)
         
-        # Кнопки управления - первый ряд
-        buttons_layout1 = QtWidgets.QHBoxLayout()
-        
         # Кнопка очистки сообщений
         self.clear_button = QtWidgets.QPushButton('Очистить сообщения')
         self.clear_button.clicked.connect(self.clear_messages)
-        buttons_layout1.addWidget(self.clear_button)
-        
-        # Кнопка тестирования выполнения кода
-        self.test_code_button = QtWidgets.QPushButton('Тест print("hello")')
-        self.test_code_button.clicked.connect(self.test_print_hello)
-        buttons_layout1.addWidget(self.test_code_button)
-        
-        layout.addLayout(buttons_layout1)
-        
-        # Кнопки управления - второй ряд
-        buttons_layout2 = QtWidgets.QHBoxLayout()
-        
-        # Кнопка отправки тестового JSON
-        self.send_test_json_button = QtWidgets.QPushButton('Отправить тестовый JSON')
-        self.send_test_json_button.clicked.connect(self.send_test_json)
-        buttons_layout2.addWidget(self.send_test_json_button)
-        
-        # Кнопка тестирования обработки JSON
-        self.test_json_button = QtWidgets.QPushButton('Тест обработки JSON')
-        self.test_json_button.clicked.connect(self.test_json_processing_button)
-        buttons_layout2.addWidget(self.test_json_button)
-        
-        # Кнопка эмуляции получения сообщения от сервера
-        self.emulate_server_button = QtWidgets.QPushButton('Эмуляция сообщения от сервера')
-        self.emulate_server_button.clicked.connect(self.emulate_server_message)
-        buttons_layout2.addWidget(self.emulate_server_button)
-        
-        layout.addLayout(buttons_layout2)
-        
-        # Кнопки управления - третий ряд
-        buttons_layout3 = QtWidgets.QHBoxLayout()
-        
-        # Кнопка для отправки запроса на сервер для отправки JSON
-        self.request_json_button = QtWidgets.QPushButton('Запросить JSON с сервера')
-        self.request_json_button.clicked.connect(self.request_json_from_server)
-        buttons_layout3.addWidget(self.request_json_button)
-        
-        layout.addLayout(buttons_layout3)
+        layout.addWidget(self.clear_button)
 
     def toggle_connection(self):
         if not self.is_connected:
@@ -254,13 +214,6 @@ class PLMClientWindow(QtWidgets.QWidget):
             return
             
         try:
-            # Проверяем, является ли сообщение тестовой командой
-            if message.startswith('TEST_JSON:'):
-                json_str = message[len('TEST_JSON:'):].strip()
-                self.test_json_processing(json_str)
-                self.message_input.clear()
-                return
-                
             self.send_message(message)
             self.add_message(f"Отправлено: {message}")
             self.message_input.clear()
@@ -308,7 +261,7 @@ class PLMClientWindow(QtWidgets.QWidget):
             self.disconnect_from_server()
         event.accept()
         
-    # Новые функции для выполнения Python-кода
+    # Функции для выполнения Python-кода
     
     def process_received_message(self, message):
         """
@@ -363,13 +316,6 @@ class PLMClientWindow(QtWidgets.QWidget):
                         print(f"Найден python_code: {code}")
                         # Используем сигнал для выполнения кода в главном потоке
                         self.execute_code_signal.emit(code)
-                        return
-                        
-                    # Если есть поле command, выполняем команду
-                    if 'command' in data:
-                        # Добавляем отладочное сообщение
-                        print(f"Найдена команда: {data['command']}")
-                        self.execute_freecad_command(data)
                         return
                         
             except json.JSONDecodeError as e:
@@ -461,17 +407,6 @@ class PLMClientWindow(QtWidgets.QWidget):
             print(error_msg)
             self.message_received.emit(error_msg)
     
-    @QtCore.Slot()
-    def showDialogWrapper(self):
-        """Обертка для вызова диалога в главном потоке"""
-        # Этот метод больше не используется, но оставляем для совместимости
-        pass
-    
-    def ask_to_execute_code_dialog(self):
-        """Показывает диалог для подтверждения выполнения кода"""
-        # Этот метод больше не используется, но оставляем для совместимости
-        pass
-    
     def execute_code_in_main_thread(self, code):
         """
         Выполняет Python-код в главном потоке
@@ -518,159 +453,3 @@ class PLMClientWindow(QtWidgets.QWidget):
             error_msg = f"Ошибка при выполнении Python-кода: {str(e)}\n{traceback.format_exc()}"
             print(error_msg)
             self.add_message(error_msg)
-    
-    def execute_freecad_code(self, code):
-        """
-        Выполняет код в интерпретаторе FreeCAD
-        
-        Args:
-            code (str): Python-код для выполнения в FreeCAD
-        """
-        # Используем сигнал для выполнения кода в главном потоке
-        self.execute_code_signal.emit(code)
-        
-    def execute_freecad_command(self, command_data):
-        """
-        Выполняет команду FreeCAD
-        
-        Args:
-            command_data (dict): Данные команды
-        """
-        try:
-            # Проверяем, что command_data - словарь
-            if not isinstance(command_data, dict):
-                self.add_message("Ошибка: данные команды должны быть словарем")
-                return
-                
-            # Выполняем команду
-            result = self.freecad_executor.execute_command(command_data)
-            
-            # Обрабатываем результат
-            if result['success']:
-                self.add_message(result['message'])
-                
-                # Если есть результат, выводим его
-                if 'result' in result and result['result']:
-                    self.add_message(f"Результат: {json.dumps(result['result'], ensure_ascii=False)}")
-            else:
-                error_msg = f"Ошибка при выполнении команды: {result.get('error', 'Неизвестная ошибка')}"
-                self.add_message(error_msg)
-                
-        except Exception as e:
-            error_msg = f"Ошибка при выполнении команды: {str(e)}\n{traceback.format_exc()}"
-            print(error_msg)
-            self.add_message(error_msg)
-
-    def test_json_processing(self, json_str):
-        """
-        Тестовая функция для проверки обработки JSON-сообщений
-        
-        Args:
-            json_str (str): JSON-строка для тестирования
-        """
-        print(f"Тестирование обработки JSON: {json_str}")
-        try:
-            # Пытаемся распарсить JSON
-            data = json.loads(json_str)
-            print(f"JSON успешно распарсен: {data}")
-            
-            # Проверяем наличие ключа python_code
-            if 'python_code' in data:
-                print(f"Найден ключ python_code: {data['python_code']}")
-                # Выполняем код
-                self.execute_code_in_main_thread(data['python_code'])
-            else:
-                print(f"Ключ python_code не найден. Доступные ключи: {list(data.keys())}")
-        except json.JSONDecodeError as e:
-            print(f"Ошибка при разборе JSON: {str(e)}")
-        except Exception as e:
-            print(f"Другая ошибка: {str(e)}")
-
-    def test_print_hello(self):
-        """
-        Тестовая функция для выполнения кода print("hello")
-        """
-        self.execute_code_in_main_thread('print("hello")')
-
-    def send_test_json(self):
-        """
-        Отправляет тестовый JSON на сервер
-        """
-        if not self.is_connected or not self.send_message:
-            self.add_message("Ошибка: Нет активного соединения")
-            return
-            
-        # Создаем тестовый JSON
-        test_json = {
-            "python_code": "print('hello from test JSON')"
-        }
-        
-        # Преобразуем в строку
-        json_str = json.dumps(test_json)
-        
-        self.add_message(f"Отправка тестового JSON: {json_str}")
-        
-        try:
-            # Отправляем JSON
-            self.send_message(json_str)
-            self.add_message("Тестовый JSON отправлен")
-        except Exception as e:
-            self.add_message(f"Ошибка при отправке тестового JSON: {str(e)}")
-
-    def test_json_processing_button(self):
-        """
-        Тестирует обработку JSON непосредственно в клиенте
-        """
-        # Создаем тестовый JSON
-        test_json = {
-            "python_code": "print('hello from direct JSON test')"
-        }
-        
-        # Преобразуем в строку
-        json_str = json.dumps(test_json)
-        
-        self.add_message(f"Тестирование обработки JSON: {json_str}")
-        
-        # Вызываем функцию обработки JSON
-        self.process_received_message(json_str)
-
-    def emulate_server_message(self):
-        """
-        Эмулирует получение сообщения от сервера
-        """
-        # Создаем тестовый JSON
-        test_json = {
-            "python_code": "print('hello from emulated server message')"
-        }
-        
-        # Преобразуем в строку
-        json_str = json.dumps(test_json)
-        
-        self.add_message(f"Эмуляция получения сообщения от сервера: {json_str}")
-        
-        # Эмулируем получение сообщения
-        message_text = f"Получено: {json_str}"
-        self.message_received.emit(message_text)
-        
-        # Обрабатываем сообщение
-        self.process_received_message(json_str)
-
-    def request_json_from_server(self):
-        """
-        Отправляет запрос на сервер для отправки JSON
-        """
-        if not self.is_connected or not self.send_message:
-            self.add_message("Ошибка: Нет активного соединения")
-            return
-            
-        # Создаем запрос
-        request = "SEND_JSON_TEST"
-        
-        self.add_message(f"Отправка запроса на сервер для отправки JSON: {request}")
-        
-        try:
-            # Отправляем запрос
-            self.send_message(request)
-            self.add_message("Запрос отправлен")
-        except Exception as e:
-            self.add_message(f"Ошибка при отправке запроса: {str(e)}")
