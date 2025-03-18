@@ -121,4 +121,66 @@ print('Hello from FreeCAD!')
 
 - Код выполняется в контексте текущего процесса FreeCAD
 - Некоторые операции могут требовать перезагрузки FreeCAD
-- Выполнение вредоносного кода может повредить систему пользователя 
+- Выполнение вредоносного кода может повредить систему пользователя
+
+## Отправка результатов через WebSocket
+
+Класс `FreeCADExecutor` теперь поддерживает отправку результатов выполнения кода на сервер через WebSocket. Для использования этой функциональности:
+
+1. Инициализируйте `FreeCADExecutor` с функцией обратного вызова `websocket_sender`:
+
+```python
+def websocket_sender(data):
+    # Преобразуем данные в JSON
+    json_data = json.dumps(data)
+    # Отправляем через веб-сокет
+    send_message(json_data)
+
+executor = FreeCADExecutor(
+    logger_callback=print,
+    websocket_sender=websocket_sender
+)
+```
+
+2. Используйте параметр `send_result=True` при вызове методов `execute_code` или `execute_simple_command`:
+
+```python
+result = executor.execute_code(code, send_result=True)
+```
+
+3. Структура отправляемых данных:
+
+```json
+{
+    "type": "execution_result",
+    "data": {
+        "success": true,
+        "message": "Python-код успешно выполнен",
+        "result": { ... } // Результат выполнения кода
+    }
+}
+```
+
+4. Пример интеграции с клиентом WebSocket:
+
+```python
+from plm_client.freecad_executor import FreeCADExecutor
+from plm_client.socket_client import create_websocket_client
+
+# Создаем WebSocket клиент
+send_message, receive_message, close_connection = create_websocket_client('localhost', 8765)
+
+# Функция для отправки результатов через WebSocket
+def websocket_sender(data):
+    json_data = json.dumps(data)
+    send_message(json_data)
+
+# Инициализируем executor с настроенной функцией отправки
+executor = FreeCADExecutor(
+    logger_callback=print,
+    websocket_sender=websocket_sender
+)
+
+# Выполняем код с отправкой результата на сервер
+executor.execute_code("result = {'message': 'Hello from FreeCAD!'}", send_result=True)
+``` 

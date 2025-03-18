@@ -1,7 +1,7 @@
 import json
 import threading
 import time
-from PySide2 import QtWidgets, QtCore, QtGui
+from PySide2 import QtWidgets, QtCore
 
 from socket_client import create_websocket_client
 
@@ -409,7 +409,7 @@ class PLMClientWindow(QtWidgets.QWidget):
     
     def execute_code_in_main_thread(self, code):
         """
-        Выполняет Python-код в главном потоке
+        Выполняет Python-код в главном потоке и отправляет результат на сервер через WebSocket
         
         Args:
             code (str): Python-код для выполнения
@@ -420,17 +420,34 @@ class PLMClientWindow(QtWidgets.QWidget):
             
             self.add_message(f"Выполнение Python-кода...")
             
+            # Создаем функцию отправки результатов через веб-сокет
+            def websocket_sender(data):
+                if self.is_connected and self.send_message:
+                    try:
+                        # Преобразуем данные в JSON
+                        json_data = json.dumps(data)
+                        # Отправляем через веб-сокет
+                        self.send_message(json_data)
+                        self.add_message(f"Результат отправлен на сервер")
+                    except Exception as e:
+                        self.add_message(f"Ошибка при отправке результата: {str(e)}")
+                else:
+                    self.add_message("Не удалось отправить результат: нет подключения к серверу")
+            
+            # Настраиваем executor для отправки результатов через веб-сокет
+            self.freecad_executor.websocket_sender = websocket_sender
+            
             # Проверяем, является ли код простой командой
             if code.strip().startswith('print(') or len(code.strip().split('\n')) == 1:
                 # Добавляем отладочное сообщение
                 print(f"Выполнение простой команды: {code}")
-                # Используем метод для выполнения простых команд
-                result = self.freecad_executor.execute_simple_command(code)
+                # Используем метод для выполнения простых команд с отправкой результата
+                result = self.freecad_executor.execute_simple_command(code, send_result=True)
             else:
                 # Добавляем отладочное сообщение
                 print(f"Выполнение сложного кода")
-                # Используем FreeCADExecutor для выполнения кода
-                result = self.freecad_executor.execute_code(code)
+                # Используем FreeCADExecutor для выполнения кода с отправкой результата
+                result = self.freecad_executor.execute_code(code, send_result=True)
             
             # Добавляем отладочное сообщение
             print(f"Результат выполнения: {result}")

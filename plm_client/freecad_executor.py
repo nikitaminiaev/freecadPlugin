@@ -10,6 +10,9 @@ import importlib
 import json
 from typing import Dict, Any, Callable
 
+# Добавляем импорт для поддержки асинхронных операций, если они потребуются
+import threading
+
 
 class FreeCADExecutor:
     """
@@ -17,14 +20,16 @@ class FreeCADExecutor:
     Предоставляет безопасное окружение для выполнения кода и доступ к API FreeCAD.
     """
     
-    def __init__(self, logger_callback: Callable[[str], None] = None):
+    def __init__(self, logger_callback: Callable[[str], None] = None, websocket_sender: Callable[[Dict[str, Any]], None] = None):
         """
         Инициализирует исполнитель кода FreeCAD.
         
         Args:
             logger_callback: Функция обратного вызова для логирования сообщений
+            websocket_sender: Функция для отправки сообщений через веб-сокет
         """
         self.logger = logger_callback or print
+        self.websocket_sender = websocket_sender
         # Откладываем настройку окружения до первого использования
         self.freecad_available = None
         
@@ -56,12 +61,13 @@ class FreeCADExecutor:
         except Exception as e:
             self.logger(f"Ошибка при настройке путей: {str(e)}")
     
-    def execute_code(self, code: str) -> Dict[str, Any]:
+    def execute_code(self, code: str, send_result: bool = False) -> Dict[str, Any]:
         """
         Выполняет Python-код в интерпретаторе FreeCAD.
         
         Args:
             code: Python-код для выполнения
+            send_result: Отправлять ли результат через веб-сокет
             
         Returns:
             Словарь с результатами выполнения:
@@ -74,11 +80,14 @@ class FreeCADExecutor:
         self._setup_environment()
         
         if not self.freecad_available:
-            return {
+            result = {
                 'success': False,
                 'message': 'FreeCAD не доступен',
                 'error': 'Не удалось импортировать FreeCAD. Убедитесь, что FreeCAD установлен и доступен.'
             }
+            if send_result and self.websocket_sender:
+                self.send_result_via_websocket(result)
+            return result
             
         try:
             self.logger("Выполнение Python-кода...")
@@ -120,29 +129,43 @@ class FreeCADExecutor:
             if 'result' in local_vars:
                 result = local_vars['result']
                 
-            return {
+            result_dict = {
                 'success': True,
                 'message': 'Python-код успешно выполнен',
                 'result': result
             }
+            
+            # Отправляем результат через веб-сокет, если это требуется
+            if send_result and self.websocket_sender:
+                self.send_result_via_websocket(result_dict)
+                
+            return result_dict
                 
         except Exception as e:
             error_msg = f"Ошибка при выполнении Python-кода: {str(e)}\n{traceback.format_exc()}"
             self.logger(error_msg)
-            return {
+            
+            result_dict = {
                 'success': False,
                 'message': 'Ошибка при выполнении кода',
                 'error': str(e),
                 'traceback': traceback.format_exc()
             }
+            
+            # Отправляем сообщение об ошибке через веб-сокет, если это требуется
+            if send_result and self.websocket_sender:
+                self.send_result_via_websocket(result_dict)
+                
+            return result_dict
     
-    def execute_simple_command(self, command: str) -> Dict[str, Any]:
+    def execute_simple_command(self, command: str, send_result: bool = False) -> Dict[str, Any]:
         """
         Выполняет простую команду FreeCAD.
         Это обертка для execute_code, которая обрабатывает простые команды.
         
         Args:
             command: Строка с командой
+            send_result: Отправлять ли результат через веб-сокет
             
         Returns:
             Словарь с результатами выполнения
@@ -176,26 +199,65 @@ class FreeCADExecutor:
                 # Добавляем отладочное сообщение
                 self.logger(f"Результат выполнения print(): {output}")
                 
-                return {
+                result_dict = {
                     'success': True,
                     'message': f'Команда выполнена: {command}',
                     'result': output
                 }
+                
+                # Отправляем результат через веб-сокет, если это требуется
+                if send_result and self.websocket_sender:
+                    self.send_result_via_websocket(result_dict)
+                
+                return result_dict
             except Exception as e:
                 # Добавляем отладочное сообщение
                 self.logger(f"Ошибка при выполнении print(): {str(e)}")
                 
-                return {
+                result_dict = {
                     'success': False,
                     'message': f'Ошибка при выполнении команды: {command}',
                     'error': str(e)
                 }
+                
+                # Отправляем сообщение об ошибке через веб-сокет, если это требуется
+                if send_result and self.websocket_sender:
+                    self.send_result_via_websocket(result_dict)
+                
+                return result_dict
         
         # Добавляем отладочное сообщение
         self.logger("Используем обычный execute_code для выполнения команды")
         
         # Для других команд используем обычный execute_code
-        return self.execute_code(command)
+        return self.execute_code(command, send_result)
+        
+    def send_result_via_websocket(self, result: Dict[str, Any]) -> None:
+        """
+        Отправляет результат выполнения кода через веб-сокет.
+        
+        Args:
+            result: Словарь с результатами выполнения
+        """
+        if not self.websocket_sender:
+            self.logger("Предупреждение: Не настроен обработчик веб-сокета для отправки результатов")
+            return
+            
+        try:
+            # Преобразуем результат в JSON
+            json_result = json.dumps(result)
+            
+            # Добавляем метку для идентификации типа сообщения
+            data_to_send = {
+                'type': 'execution_result',
+                'data': result
+            }
+            
+            # Отправляем через веб-сокет
+            self.websocket_sender(data_to_send)
+            self.logger("Результат успешно отправлен через веб-сокет")
+        except Exception as e:
+            self.logger(f"Ошибка при отправке результата через веб-сокет: {str(e)}")
 
 
 # Пример использования
