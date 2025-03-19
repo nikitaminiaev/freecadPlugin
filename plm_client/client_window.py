@@ -15,8 +15,6 @@ class PLMClientWindow(QtWidgets.QWidget):
     connection_status_changed = QtCore.Signal(bool, str)
     # Добавляем сигнал для выполнения кода в главном потоке
     execute_code_signal = QtCore.Signal(str)
-    # Добавляем сигнал для показа диалога в главном потоке
-    show_dialog_signal = QtCore.Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -36,8 +34,6 @@ class PLMClientWindow(QtWidgets.QWidget):
         self.connection_status_changed.connect(self.update_connection_status)
         # Подключаем сигнал для выполнения кода
         self.execute_code_signal.connect(self.execute_code_in_main_thread)
-        # Подключаем сигнал для показа диалога
-        self.show_dialog_signal.connect(self._show_execute_dialog)
 
     def setup_ui(self):
         self.setWindowTitle('PLM Client')
@@ -265,7 +261,8 @@ class PLMClientWindow(QtWidgets.QWidget):
     
     def process_received_message(self, message):
         """
-        Обрабатывает полученное сообщение и определяет, является ли оно Python-кодом для выполнения
+        Обрабатывает полученное сообщение и выполняет Python-код из поля python_code в JSON.
+        Если сообщение не в формате JSON, выводит его как информационное сообщение.
         
         Args:
             message (str): Полученное сообщение от сервера
@@ -273,18 +270,6 @@ class PLMClientWindow(QtWidgets.QWidget):
         try:
             # Добавляем отладочное сообщение
             print(f"Обработка сообщения: {message}")
-            
-            # Проверяем, не начинается ли сообщение с "Получено: "
-            if message.startswith("Получено: "):
-                # Удаляем префикс "Получено: "
-                message = message[len("Получено: "):]
-                print(f"Удален префикс 'Получено: ', новое сообщение: {message}")
-            
-            # Проверяем, не начинается ли сообщение с "Сервер получил: "
-            if message.startswith("Сервер получил: "):
-                # Это эхо-ответ от сервера, не обрабатываем его как код
-                print(f"Обнаружено эхо-сообщение от сервера, пропускаем обработку")
-                return
             
             # Проверяем, не является ли сообщение уже строкой JSON
             # Иногда WebSocket может добавлять кавычки вокруг JSON
@@ -305,105 +290,26 @@ class PLMClientWindow(QtWidgets.QWidget):
                 print(f"Сообщение успешно распарсено как JSON: {data}")
                 
                 # Проверяем, содержит ли JSON поле с Python-кодом
-                if isinstance(data, dict):
+                if isinstance(data, dict) and 'python_code' in data:
+                    code = data['python_code']
                     # Добавляем отладочное сообщение
-                    print(f"Ключи в JSON: {list(data.keys())}")
+                    print(f"Найден python_code: {code}")
+                    # Используем сигнал для выполнения кода в главном потоке
+                    self.execute_code_signal.emit(code)
+                else:
+                    print(f"В сообщении JSON отсутствует поле 'python_code'")
+                    # Выводим информационное сообщение о полученных данных
+                    self.message_received.emit(f"Информация: Получены данные: {json.dumps(data, ensure_ascii=False)}")
                     
-                    # Если есть поле python_code, выполняем код
-                    if 'python_code' in data:
-                        code = data['python_code']
-                        # Добавляем отладочное сообщение
-                        print(f"Найден python_code: {code}")
-                        # Используем сигнал для выполнения кода в главном потоке
-                        self.execute_code_signal.emit(code)
-                        return
-                        
             except json.JSONDecodeError as e:
                 # Добавляем отладочное сообщение
-                print(f"Ошибка при разборе JSON: {str(e)}")
-                # Если сообщение не является JSON, проверяем другие форматы
-                pass
+                print(f"Сообщение не является JSON: {str(e)}")
                 
-            # Проверяем, начинается ли сообщение с маркера Python-кода
-            if message.startswith('EXEC_PYTHON:'):
-                code = message[len('EXEC_PYTHON:'):].strip()
-                # Используем сигнал для выполнения кода в главном потоке
-                self.execute_code_signal.emit(code)
-                return
-                
-            # Проверяем, является ли сообщение простым Python-кодом
-            # Список распространенных функций и операторов Python
-            python_functions = ['print(', 'len(', 'range(', 'str(', 'int(', 'float(', 'list(', 'dict(', 'set(', 'tuple(']
-            python_keywords = ['import', 'def ', 'class ', 'for ', 'while ', 'if ', 'else:', 'elif ', 'try:', 'except:', 'with ', 'return ', 'yield ', 'lambda ']
-            freecad_keywords = ['FreeCAD', 'App.', 'Gui.', 'Part.', 'Draft.', 'Mesh.', 'Sketcher.', 'PartDesign.']
-            
-            # Если сообщение содержит любую из этих строк, считаем его Python-кодом
-            is_python_code = False
-            
-            # Проверяем на наличие функций Python
-            if any(func in message for func in python_functions):
-                is_python_code = True
-            
-            # Проверяем на наличие ключевых слов Python
-            if any(keyword in message for keyword in python_keywords):
-                is_python_code = True
-                
-            # Проверяем на наличие ключевых слов FreeCAD
-            if any(keyword in message for keyword in freecad_keywords):
-                is_python_code = True
-                
-            # Проверяем, содержит ли сообщение операторы присваивания или математические операции
-            if '=' in message and not '==' in message:
-                is_python_code = True
-                
-            # Если сообщение выглядит как Python-код, выполняем его
-            if is_python_code:
-                # Для простых команд выполняем без подтверждения
-                if len(message) < 50 and ('print(' in message or 'FreeCAD' in message):
-                    self.execute_code_signal.emit(message)
-                else:
-                    # Для более сложных команд спрашиваем подтверждение
-                    self.ask_to_execute_code(message)
-                return
+                # Просто выводим сообщение как информационное
+                self.message_received.emit(f"Информация: {message}")
                 
         except Exception as e:
             error_msg = f"Ошибка при обработке сообщения: {str(e)}"
-            print(error_msg)
-            self.message_received.emit(error_msg)
-    
-    def ask_to_execute_code(self, code):
-        """
-        Спрашивает пользователя, выполнять ли полученный код
-        
-        Args:
-            code (str): Python-код для выполнения
-        """
-        # Сохраняем код для использования в диалоге
-        self._pending_code = code
-        
-        # Используем сигнал для безопасного создания диалога в главном потоке
-        self.show_dialog_signal.emit(code)
-    
-    def _show_execute_dialog(self, code):
-        """
-        Показывает диалог для подтверждения выполнения кода в главном потоке
-        
-        Args:
-            code (str): Python-код для выполнения
-        """
-        try:
-            reply = QtWidgets.QMessageBox.question(
-                self, 
-                'Выполнить код?',
-                f'Получен Python-код. Выполнить его?\n\n{code[:200]}{"..." if len(code) > 200 else ""}',
-                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                QtWidgets.QMessageBox.No
-            )
-            
-            if reply == QtWidgets.QMessageBox.Yes:
-                self.execute_code_in_main_thread(code)
-        except Exception as e:
-            error_msg = f"Ошибка при создании диалога: {str(e)}"
             print(error_msg)
             self.message_received.emit(error_msg)
     
@@ -437,17 +343,8 @@ class PLMClientWindow(QtWidgets.QWidget):
             # Настраиваем executor для отправки результатов через веб-сокет
             self.freecad_executor.websocket_sender = websocket_sender
             
-            # Проверяем, является ли код простой командой
-            if code.strip().startswith('print(') or len(code.strip().split('\n')) == 1:
-                # Добавляем отладочное сообщение
-                print(f"Выполнение простой команды: {code}")
-                # Используем метод для выполнения простых команд с отправкой результата
-                result = self.freecad_executor.execute_simple_command(code, send_result=True)
-            else:
-                # Добавляем отладочное сообщение
-                print(f"Выполнение сложного кода")
-                # Используем FreeCADExecutor для выполнения кода с отправкой результата
-                result = self.freecad_executor.execute_code(code, send_result=True)
+            # Используем FreeCADExecutor для выполнения кода с отправкой результата
+            result = self.freecad_executor.execute_code(code, send_result=True)
             
             # Добавляем отладочное сообщение
             print(f"Результат выполнения: {result}")
