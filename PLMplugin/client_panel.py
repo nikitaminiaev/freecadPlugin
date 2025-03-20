@@ -1,12 +1,14 @@
 import json
 import threading
 import time
+from plm_functions import PLMFunctions
 from PySide2 import QtWidgets, QtCore
 
 from socket_client import create_websocket_client
 import traceback
 from freecad_executor import FreeCADExecutor
 from logger import log
+from function_registry import FunctionRegistry
 
 class PLMClientPanel(QtWidgets.QWidget):
     # Сигнал для обновления UI из другого потока
@@ -14,6 +16,8 @@ class PLMClientPanel(QtWidgets.QWidget):
     connection_status_changed = QtCore.Signal(bool, str)
     # Добавляем сигнал для выполнения кода в главном потоке
     execute_code_signal = QtCore.Signal(str)
+    # Добавляем сигнал для выполнения функций в главном потоке
+    execute_function_signal = QtCore.Signal(str, dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -24,6 +28,10 @@ class PLMClientPanel(QtWidgets.QWidget):
         self.is_connected = False
         
         self.freecad_executor = FreeCADExecutor()
+        self.function_registry = FunctionRegistry()  # Создаем экземпляр реестра функций
+        
+        # Переменная для хранения PLMFunctions
+        self.plm_functions = None
         
         self.setup_ui()
         
@@ -32,6 +40,8 @@ class PLMClientPanel(QtWidgets.QWidget):
         self.connection_status_changed.connect(self.update_connection_status)
         # Подключаем сигнал для выполнения кода
         self.execute_code_signal.connect(self.execute_code_in_main_thread)
+        # Подключаем сигнал для выполнения функций
+        self.execute_function_signal.connect(self.execute_function_in_main_thread)
 
     def setup_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
@@ -290,8 +300,17 @@ class PLMClientPanel(QtWidgets.QWidget):
                     log(f"Найден python_code: {code}")
                     # Используем сигнал для выполнения кода в главном потоке
                     self.execute_code_signal.emit(code)
+                # Проверяем наличие вызова функции
+                elif isinstance(data, dict) and 'function_call' in data:
+                    function_name = data['function_call']
+                    # Извлекаем аргументы (если они есть)
+                    function_args = data.get('arguments', {})
+                    # Добавляем отладочное сообщение
+                    log(f"Найден function_call: {function_name}, аргументы: {function_args}")
+                    # Используем сигнал для выполнения функции в главном потоке
+                    self.execute_function_signal.emit(function_name, function_args)
                 else:
-                    log(f"В сообщении JSON отсутствует поле 'python_code'")
+                    log(f"В сообщении JSON отсутствует поле 'python_code' или 'function_call'")
                     # Выводим информационное сообщение о полученных данных
                     self.message_received.emit(f"Информация: Получены данные: {json.dumps(data, ensure_ascii=False)}")
                     
@@ -360,4 +379,94 @@ class PLMClientPanel(QtWidgets.QWidget):
         except Exception as e:
             error_msg = f"Ошибка при выполнении Python-кода: {str(e)}\n{traceback.format_exc()}"
             log(error_msg)
-            self.add_message(error_msg) 
+            self.add_message(error_msg)
+
+    def execute_function_in_main_thread(self, function_name, function_args):
+        """
+        Выполняет вызов функции в главном потоке и отправляет результат на сервер
+        
+        Args:
+            function_name (str): Имя функции для вызова
+            function_args (dict): Аргументы функции
+        """
+        try:
+            # Добавляем отладочное сообщение
+            log(f"Выполнение функции в главном потоке: {function_name} с аргументами: {function_args}")
+            
+            self.add_message(f"Выполнение функции: {function_name}...")
+            
+            # Создаем функцию отправки результатов через веб-сокет (аналогично execute_code_in_main_thread)
+            def websocket_sender(data):
+                if self.is_connected and self.send_message:
+                    try:
+                        # Преобразуем данные в JSON
+                        json_data = json.dumps(data)
+                        # Отправляем через веб-сокет
+                        self.send_message(json_data)
+                        self.add_message(f"Результат отправлен на сервер")
+                    except Exception as e:
+                        self.add_message(f"Ошибка при отправке результата: {str(e)}")
+                else:
+                    self.add_message("Не удалось отправить результат: нет подключения к серверу")
+            
+            # Передаем функцию отправки в реестр функций
+            self.function_registry.websocket_sender = websocket_sender
+            
+            # Вызываем функцию из реестра и получаем результат
+            result = self.function_registry.execute_function(function_name, function_args)
+            
+            # Добавляем отладочное сообщение
+            log(f"Результат выполнения функции: {result}")
+            
+            # Отправляем результат на сервер
+            if self.is_connected and self.send_message:
+                try:
+                    response_data = {
+                        "function_response": function_name,
+                        "result": result
+                    }
+                    json_response = json.dumps(response_data)
+                    self.send_message(json_response)
+                    self.add_message(f"Результат функции {function_name} отправлен на сервер")
+                except Exception as e:
+                    error_msg = f"Ошибка при отправке результата функции: {str(e)}"
+                    log(error_msg)
+                    self.add_message(error_msg)
+            
+            # Выводим информацию о выполнении в UI
+            self.add_message(f"Функция {function_name} выполнена успешно")
+            if result:
+                self.add_message(f"Результат: {json.dumps(result, ensure_ascii=False)}")
+                
+        except Exception as e:
+            error_msg = f"Ошибка при выполнении функции {function_name}: {str(e)}\n{traceback.format_exc()}"
+            log(error_msg)
+            self.add_message(error_msg)
+            
+            # Отправляем информацию об ошибке на сервер
+            if self.is_connected and self.send_message:
+                try:
+                    error_data = {
+                        "function_response": function_name,
+                        "error": str(e),
+                        "traceback": traceback.format_exc()
+                    }
+                    json_error = json.dumps(error_data)
+                    self.send_message(json_error)
+                except Exception as send_error:
+                    self.add_message(f"Ошибка при отправке информации об ошибке: {str(send_error)}")
+
+    def set_plm_functions(self, plm_functions: PLMFunctions):
+        """
+        Устанавливает PLMFunctions и регистрирует их в реестре функций
+        
+        Args:
+            plm_functions: Экземпляр PLMFunctions
+        """
+        self.plm_functions = plm_functions
+        
+        if self.plm_functions:
+            # Регистрируем функции PLM в реестре
+            self.plm_functions.register_functions(self.function_registry)
+            self.add_message("Функции PLM зарегистрированы в реестре")
+            log("PLM функции успешно зарегистрированы в реестре функций клиентской панели") 

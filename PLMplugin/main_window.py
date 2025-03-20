@@ -7,6 +7,7 @@ from models import BasicObject
 from widgets import ObjectTreeWidget
 from api_client import APIClient
 from client_panel import PLMClientPanel
+from plm_functions import PLMFunctions
 
 
 class PLMMainWindow(QtWidgets.QWidget):
@@ -16,6 +17,7 @@ class PLMMainWindow(QtWidgets.QWidget):
         self.api_client = APIClient()
         self.client_panel = None  # Панель клиента WebSocket
         self.is_client_panel_visible = False
+        self.plm_functions = PLMFunctions(self)
         self.setup_ui()
 
     def setup_ui(self):
@@ -116,6 +118,8 @@ class PLMMainWindow(QtWidgets.QWidget):
             # Создаем панель, если она еще не создана
             if not self.client_panel:
                 self.client_panel = PLMClientPanel()
+                # Передаем функции PLM в панель клиента
+                self.client_panel.set_plm_functions(self.plm_functions)
             
             # Добавляем панель к разделителю
             self.main_splitter.addWidget(self.client_panel)

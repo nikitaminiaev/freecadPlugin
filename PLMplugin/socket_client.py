@@ -129,14 +129,14 @@ def create_websocket_client(host, port):
                     result = payload.decode('utf-8')
                     log(f"Декодировано как UTF-8: {result}")
                     
-                    # Проверяем, является ли сообщение JSON
-                    try:
-                        json_data = json.loads(result)
-                        log(f"Сообщение является JSON: {json_data}")
-                        if isinstance(json_data, dict) and 'python_code' in json_data:
-                            log(f"Найден ключ python_code: {json_data['python_code']}")
-                    except json.JSONDecodeError:
-                        log("Сообщение не является JSON")
+                    # # Проверяем, является ли сообщение JSON
+                    # try:
+                    #     json_data = json.loads(result)
+                    #     log(f"Сообщение является JSON: {json_data}")
+                    #     if isinstance(json_data, dict) and 'python_code' in json_data:
+                    #         log(f"Найден ключ python_code: {json_data['python_code']}")
+                    # except json.JSONDecodeError:
+                    #     log("Сообщение не является JSON")
                     
                     return result
                 except UnicodeDecodeError as e:
