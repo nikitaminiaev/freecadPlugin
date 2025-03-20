@@ -6,6 +6,7 @@ from cad_utils import CADUtils, PartCreationDTO, Coordinates
 from models import BasicObject
 from widgets import ObjectTreeWidget
 from api_client import APIClient
+from client_panel import PLMClientPanel
 
 
 class PLMMainWindow(QtWidgets.QWidget):
@@ -13,14 +14,21 @@ class PLMMainWindow(QtWidgets.QWidget):
         super().__init__()
         self.last_opened_obj_ids = []
         self.api_client = APIClient()
+        self.client_panel = None  # Панель клиента WebSocket
+        self.is_client_panel_visible = False
         self.setup_ui()
 
     def setup_ui(self):
         self.setWindowTitle('PLM')
         self.setGeometry(100, 100, 600, 400)
 
-        layout = QtWidgets.QVBoxLayout(self)
-
+        # Создаем разделитель для основного окна и клиентской панели
+        self.main_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        
+        # Создаем контейнер для основных элементов PLM
+        self.main_container = QtWidgets.QWidget()
+        main_layout = QtWidgets.QVBoxLayout(self.main_container)
+        
         # Count display area
         count_layout = QtWidgets.QHBoxLayout()
         self.count_label = QtWidgets.QLabel('Total objects:')
@@ -28,7 +36,7 @@ class PLMMainWindow(QtWidgets.QWidget):
         count_layout.addWidget(self.count_label)
         count_layout.addWidget(self.count_display)
         count_layout.addStretch()
-        layout.addLayout(count_layout)
+        main_layout.addLayout(count_layout)
         self.update_objects_count()  # Вызываем метод сразу после создания виджетов
 
         # Search area
@@ -56,6 +64,10 @@ class PLMMainWindow(QtWidgets.QWidget):
         self.goToSupersystemButton = QtWidgets.QPushButton('To Supersystem')
         self.goToSubsystemButton = QtWidgets.QPushButton('To Subsystem')
         self.loadInCurrentDocButton = QtWidgets.QPushButton('Load to Current Doc')
+        
+        # Добавляем кнопку для отображения/скрытия клиентской панели
+        self.toggleClientPanelButton = QtWidgets.QPushButton('WebSocket Client')
+        self.toggleClientPanelButton.clicked.connect(self.toggle_client_panel)
 
         # Connect new buttons to methods
         self.goToSupersystemButton.clicked.connect(self.go_to_supersystem)
@@ -74,13 +86,45 @@ class PLMMainWindow(QtWidgets.QWidget):
         search_layout.addWidget(self.goToSupersystemButton)
         search_layout.addWidget(self.goToSubsystemButton)
         search_layout.addWidget(self.loadInCurrentDocButton)
-        layout.addLayout(search_layout)
-        layout.addLayout(limit_layout)  # Добавляем новый layout после search_layout
+        search_layout.addWidget(self.toggleClientPanelButton)  # Добавляем кнопку клиента
+        main_layout.addLayout(search_layout)
+        main_layout.addLayout(limit_layout)  # Добавляем новый layout после search_layout
 
         # Tree widget
         self.resultsTree = ObjectTreeWidget()
         self.resultsTree.api_client = self.api_client
-        layout.addWidget(self.resultsTree)
+        main_layout.addWidget(self.resultsTree)
+        
+        # Добавляем основной контейнер в разделитель
+        self.main_splitter.addWidget(self.main_container)
+        
+        # Создаем основной layout
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(self.main_splitter)
+
+    def toggle_client_panel(self):
+        """Включает/выключает отображение панели клиента WebSocket"""
+        if self.is_client_panel_visible:
+            # Скрываем панель
+            if self.client_panel:
+                self.client_panel.hide()
+                # Удаляем панель из разделителя
+                self.main_splitter.widget(1).setParent(None)
+                self.is_client_panel_visible = False
+                self.toggleClientPanelButton.setText('WebSocket Client')
+        else:
+            # Создаем панель, если она еще не создана
+            if not self.client_panel:
+                self.client_panel = PLMClientPanel()
+            
+            # Добавляем панель к разделителю
+            self.main_splitter.addWidget(self.client_panel)
+            self.client_panel.show()
+            self.is_client_panel_visible = True
+            self.toggleClientPanelButton.setText('Close Client')
+            
+            # Устанавливаем соотношение размеров частей разделителя
+            self.main_splitter.setSizes([int(self.width() * 0.6), int(self.width() * 0.4)])
 
     def update_objects_count(self):
         """Update the total objects count display"""

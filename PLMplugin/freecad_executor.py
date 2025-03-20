@@ -185,35 +185,4 @@ class FreeCADExecutor:
             self.websocket_sender(data_to_send)
             log("Результат успешно отправлен через веб-сокет")
         except Exception as e:
-            log(f"Ошибка при отправке результата через веб-сокет: {str(e)}")
-
-
-# Пример использования
-if __name__ == "__main__":
-    # Для отладки
-    from logger import debug
-    debug = True  # Включаем отладку только для прямого запуска модуля
-    
-    executor = FreeCADExecutor()
-    
-    # Пример выполнения простого кода
-    result = executor.execute_code("""
-import FreeCAD
-import Part
-
-# Создаем новый документ
-doc = FreeCAD.newDocument("Example")
-
-# Создаем куб
-box = Part.makeBox(10, 10, 10)
-cube = doc.addObject("Part::Feature", "Cube")
-cube.Shape = box
-
-# Перерасчитываем документ
-doc.recompute()
-
-# Возвращаем результат
-result = {"object_created": cube.Name, "dimensions": [10, 10, 10]}
-""")
-    
-    print(json.dumps(result, indent=2)) 
+            log(f"Ошибка при отправке результата через веб-сокет: {str(e)}") 
