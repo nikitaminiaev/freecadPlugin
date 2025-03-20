@@ -8,6 +8,7 @@ from socket_client import create_websocket_client
 # Добавляем импорт для выполнения кода
 import traceback
 from freecad_executor import FreeCADExecutor
+from logger import log
 
 class PLMClientWindow(QtWidgets.QWidget):
     # Сигнал для обновления UI из другого потока
@@ -24,8 +25,7 @@ class PLMClientWindow(QtWidgets.QWidget):
         self.listener_thread = None
         self.is_connected = False
         
-        # Создаем экземпляр FreeCADExecutor
-        self.freecad_executor = FreeCADExecutor(logger_callback=self.add_message)
+        self.freecad_executor = FreeCADExecutor()
         
         self.setup_ui()
         
@@ -154,7 +154,7 @@ class PLMClientWindow(QtWidgets.QWidget):
     def listen_for_messages(self):
         # ВАЖНО: Нельзя напрямую вызывать self.add_message из другого потока!
         # Это может привести к краху приложения, так как UI должен обновляться только из главного потока
-        print("Запущен поток прослушивания сообщений")
+        log("Запущен поток прослушивания сообщений")
         
         # Отправляем сообщение через сигнал (безопасно)
         self.message_received.emit("Запущен поток прослушивания сообщений")
@@ -165,29 +165,29 @@ class PLMClientWindow(QtWidgets.QWidget):
                 message = self.receive_message()
                 if message:
                     # Добавляем отладочное сообщение
-                    print(f"Получено сырое сообщение от сервера: {message}")
+                    log(f"Получено сырое сообщение от сервера: {message}")
                     
                     # Используем сигнал для безопасного обновления UI из другого потока
                     message_text = f"Получено: {message}"
-                    print(message_text)  # Отладка в консоль
+                    log(message_text)  # Отладка в консоль
                     
                     # Отправляем сообщение через сигнал
                     self.message_received.emit(message_text)
                     
                     # Проверяем, является ли сообщение Python-кодом для выполнения
                     # Добавляем отладочное сообщение
-                    print("Вызываем process_received_message для обработки сообщения")
+                    log("Вызываем process_received_message для обработки сообщения")
                     self.process_received_message(message)
                     
                     # Увеличиваем счетчик сообщений
                     message_count += 1
-                    print(f"Всего получено сообщений: {message_count}")
+                    log(f"Всего получено сообщений: {message_count}")
                     
                 # Небольшая задержка, чтобы не нагружать CPU
                 time.sleep(0.1)
             except Exception as e:
                 error_msg = f"Ошибка при получении сообщения: {str(e)}"
-                print(error_msg)  # Отладочная информация в консоль
+                log(error_msg)  # Отладочная информация в консоль
                 
                 # Отправляем сообщение об ошибке через сигнал
                 self.message_received.emit(error_msg)
@@ -198,7 +198,7 @@ class PLMClientWindow(QtWidgets.QWidget):
         
         # Отправляем сообщение о завершении через сигнал
         self.message_received.emit("Поток прослушивания сообщений завершен")
-        print("Поток прослушивания сообщений завершен")
+        log("Поток прослушивания сообщений завершен")
 
     def send_message_to_server(self):
         if not self.is_connected or not self.send_message:
@@ -226,11 +226,11 @@ class PLMClientWindow(QtWidgets.QWidget):
             self.messages_display.verticalScrollBar().maximum()
         )
         # Отладка в консоль
-        print(f"Добавлено сообщение в UI: {formatted_message}")
+        log(f"Добавлено сообщение в UI: {formatted_message}")
 
     def update_messages(self, message):
         """Обновляет область сообщений (вызывается из другого потока через сигнал)"""
-        print(f"update_messages вызван с сообщением: {message}")
+        log(f"update_messages вызван с сообщением: {message}")
         self.add_message(message)
 
     def update_connection_status(self, is_connected, status_text):
@@ -269,7 +269,7 @@ class PLMClientWindow(QtWidgets.QWidget):
         """
         try:
             # Добавляем отладочное сообщение
-            print(f"Обработка сообщения: {message}")
+            log(f"Обработка сообщения: {message}")
             
             # Проверяем, не является ли сообщение уже строкой JSON
             # Иногда WebSocket может добавлять кавычки вокруг JSON
@@ -278,39 +278,39 @@ class PLMClientWindow(QtWidgets.QWidget):
                     # Пытаемся удалить внешние кавычки и распарсить
                     unquoted_message = json.loads(message)
                     if isinstance(unquoted_message, str):
-                        print(f"Сообщение было в кавычках, пробуем распарсить внутреннее содержимое: {unquoted_message}")
+                        log(f"Сообщение было в кавычках, пробуем распарсить внутреннее содержимое: {unquoted_message}")
                         message = unquoted_message
                 except Exception as e:
-                    print(f"Ошибка при попытке удалить кавычки: {str(e)}")
+                    log(f"Ошибка при попытке удалить кавычки: {str(e)}")
             
             # Пытаемся распарсить сообщение как JSON
             try:
                 data = json.loads(message)
                 # Добавляем отладочное сообщение
-                print(f"Сообщение успешно распарсено как JSON: {data}")
+                log(f"Сообщение успешно распарсено как JSON: {data}")
                 
                 # Проверяем, содержит ли JSON поле с Python-кодом
                 if isinstance(data, dict) and 'python_code' in data:
                     code = data['python_code']
                     # Добавляем отладочное сообщение
-                    print(f"Найден python_code: {code}")
+                    log(f"Найден python_code: {code}")
                     # Используем сигнал для выполнения кода в главном потоке
                     self.execute_code_signal.emit(code)
                 else:
-                    print(f"В сообщении JSON отсутствует поле 'python_code'")
+                    log(f"В сообщении JSON отсутствует поле 'python_code'")
                     # Выводим информационное сообщение о полученных данных
                     self.message_received.emit(f"Информация: Получены данные: {json.dumps(data, ensure_ascii=False)}")
                     
             except json.JSONDecodeError as e:
                 # Добавляем отладочное сообщение
-                print(f"Сообщение не является JSON: {str(e)}")
+                log(f"Сообщение не является JSON: {str(e)}")
                 
                 # Просто выводим сообщение как информационное
                 self.message_received.emit(f"Информация: {message}")
                 
         except Exception as e:
             error_msg = f"Ошибка при обработке сообщения: {str(e)}"
-            print(error_msg)
+            log(error_msg)
             self.message_received.emit(error_msg)
     
     def execute_code_in_main_thread(self, code):
@@ -322,7 +322,7 @@ class PLMClientWindow(QtWidgets.QWidget):
         """
         try:
             # Добавляем отладочное сообщение
-            print(f"Выполнение кода в главном потоке: {code}")
+            log(f"Выполнение кода в главном потоке: {code}")
             
             self.add_message(f"Выполнение Python-кода...")
             
@@ -347,7 +347,7 @@ class PLMClientWindow(QtWidgets.QWidget):
             result = self.freecad_executor.execute_code(code, send_result=True)
             
             # Добавляем отладочное сообщение
-            print(f"Результат выполнения: {result}")
+            log(f"Результат выполнения: {result}")
             
             if result['success']:
                 self.add_message(result['message'])
@@ -365,5 +365,5 @@ class PLMClientWindow(QtWidgets.QWidget):
                 
         except Exception as e:
             error_msg = f"Ошибка при выполнении Python-кода: {str(e)}\n{traceback.format_exc()}"
-            print(error_msg)
+            log(error_msg)
             self.add_message(error_msg)

@@ -9,6 +9,7 @@ import os
 import importlib
 import json
 from typing import Dict, Any, Callable
+from logger import log
 
 # Добавляем импорт для поддержки асинхронных операций, если они потребуются
 import threading
@@ -20,7 +21,7 @@ class FreeCADExecutor:
     Предоставляет безопасное окружение для выполнения кода и доступ к API FreeCAD.
     """
     
-    def __init__(self, logger_callback: Callable[[str], None] = None, websocket_sender: Callable[[Dict[str, Any]], None] = None):
+    def __init__(self, websocket_sender: Callable[[Dict[str, Any]], None] = None):
         """
         Инициализирует исполнитель кода FreeCAD.
         
@@ -28,7 +29,7 @@ class FreeCADExecutor:
             logger_callback: Функция обратного вызова для логирования сообщений
             websocket_sender: Функция для отправки сообщений через веб-сокет
         """
-        self.logger = logger_callback or print
+        
         self.websocket_sender = websocket_sender
         # Откладываем настройку окружения до первого использования
         self.freecad_available = None
@@ -44,10 +45,12 @@ class FreeCADExecutor:
             import FreeCAD
             import FreeCADGui
             self.freecad_available = True
-            self.logger("FreeCAD успешно импортирован")
+            
+            log("FreeCAD успешно импортирован")
         except ImportError:
             self.freecad_available = False
-            self.logger("Предупреждение: FreeCAD не найден. Некоторые функции могут быть недоступны.")
+            
+            log("Предупреждение: FreeCAD не найден")
             
         # Добавляем путь к PLMplugin в sys.path, если его там нет
         try:
@@ -57,9 +60,11 @@ class FreeCADExecutor:
             
             if os.path.exists(plugin_path) and plugin_path not in sys.path:
                 sys.path.append(plugin_path)
-                self.logger(f"Добавлен путь к PLMplugin: {plugin_path}")
+                
+                log(f"Добавлен путь к PLMplugin: {plugin_path}")
         except Exception as e:
-            self.logger(f"Ошибка при настройке путей: {str(e)}")
+            
+            log(f"Ошибка при настройке путей: {str(e)}")
     
     def execute_code(self, code: str, send_result: bool = False) -> Dict[str, Any]:
         """
@@ -90,7 +95,7 @@ class FreeCADExecutor:
             return result
             
         try:
-            self.logger("Выполнение Python-кода...")
+            log("Выполнение Python-кода...")
             
             # Импортируем необходимые модули FreeCAD
             import FreeCAD
@@ -119,7 +124,7 @@ class FreeCADExecutor:
                 local_vars['Coordinates'] = Coordinates
                 local_vars['PartCreationDTO'] = PartCreationDTO
             except ImportError as e:
-                self.logger(f"Предупреждение: Не удалось импортировать CADUtils: {str(e)}")
+                log(f"Предупреждение: Не удалось импортировать CADUtils: {str(e)}")
                 
             # Выполняем код
             result = {}
@@ -143,7 +148,7 @@ class FreeCADExecutor:
                 
         except Exception as e:
             error_msg = f"Ошибка при выполнении Python-кода: {str(e)}\n{traceback.format_exc()}"
-            self.logger(error_msg)
+            log(error_msg)
             
             result_dict = {
                 'success': False,
@@ -166,7 +171,7 @@ class FreeCADExecutor:
             result: Словарь с результатами выполнения
         """
         if not self.websocket_sender:
-            self.logger("Предупреждение: Не настроен обработчик веб-сокета для отправки результатов")
+            log("Предупреждение: Не настроен обработчик веб-сокета для отправки результатов")
             return
             
         try:
@@ -181,13 +186,17 @@ class FreeCADExecutor:
             
             # Отправляем через веб-сокет
             self.websocket_sender(data_to_send)
-            self.logger("Результат успешно отправлен через веб-сокет")
+            log("Результат успешно отправлен через веб-сокет")
         except Exception as e:
-            self.logger(f"Ошибка при отправке результата через веб-сокет: {str(e)}")
+            log(f"Ошибка при отправке результата через веб-сокет: {str(e)}")
 
 
 # Пример использования
 if __name__ == "__main__":
+    # Для отладки
+    from logger import debug
+    debug = True  # Включаем отладку только для прямого запуска модуля
+    
     executor = FreeCADExecutor()
     
     # Пример выполнения простого кода
