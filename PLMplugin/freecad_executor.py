@@ -63,7 +63,7 @@ class FreeCADExecutor:
             
             log(f"Ошибка при настройке путей: {str(e)}")
     
-    def execute_code(self, code: str, send_result: bool = False) -> Dict[str, Any]:
+    def execute_code(self, code: str, send_result: bool = True) -> Dict[str, Any]:
         """
         Выполняет Python-код в интерпретаторе FreeCAD.
         

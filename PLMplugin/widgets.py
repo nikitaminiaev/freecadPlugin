@@ -1,6 +1,7 @@
 from PySide2 import QtWidgets, QtCore
 from models import BasicObject
 import json
+from logger import log
 
 class ObjectTreeWidget(QtWidgets.QTreeWidget):
     def __init__(self, parent=None):
@@ -124,4 +125,4 @@ class ObjectTreeWidget(QtWidgets.QTreeWidget):
             item.takeChildren()
             error_item = QtWidgets.QTreeWidgetItem(["Error loading children", "", ""])
             item.addChild(error_item)
-            print(f"Error loading children for object {obj_id}: {str(e)}")
+            log(f"Error loading children for object {obj_id}: {str(e)}")

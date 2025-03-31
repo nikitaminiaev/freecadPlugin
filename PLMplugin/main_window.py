@@ -8,7 +8,7 @@ from widgets import ObjectTreeWidget
 from api_client import APIClient
 from client_panel import PLMClientPanel
 from plm_functions import PLMFunctions
-
+from logger import log
 
 class PLMMainWindow(QtWidgets.QWidget):
     def __init__(self):
@@ -285,7 +285,7 @@ class PLMMainWindow(QtWidgets.QWidget):
                 self.resultsTree.clear()
 
         except Exception as e:
-            print(f"Exception in search_part: {str(e)}")
+            log(f"Exception in search_part: {str(e)}")
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
             self.resultsTree.clear()
 
@@ -322,7 +322,7 @@ class PLMMainWindow(QtWidgets.QWidget):
                 self.resultsTree.clear()
 
         except Exception as e:
-            print(f"Exception in find_all_parts: {str(e)}")
+            log(f"Exception in find_all_parts: {str(e)}")
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
             self.resultsTree.clear()
 
