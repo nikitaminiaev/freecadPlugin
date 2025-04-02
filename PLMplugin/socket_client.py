@@ -2,9 +2,7 @@ import socket
 import base64
 import os
 import struct
-import time
-import json
-from logger import log
+from utils.logger import log
 
 def create_websocket_client(host, port):
     # Установление TCP-соединения

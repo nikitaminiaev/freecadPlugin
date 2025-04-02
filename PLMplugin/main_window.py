@@ -2,13 +2,13 @@ import json
 
 from PySide2 import QtWidgets, QtCore
 
-from cad_utils import CADUtils, PartCreationDTO, Coordinates
+from utils.cad_utils import CADUtils, PartCreationDTO, Coordinates
 from models import BasicObject
 from widgets import ObjectTreeWidget
 from api_client import APIClient
 from client_panel import PLMClientPanel
 from plm_functions import PLMFunctions
-from logger import log
+from utils.logger import log
 
 class PLMMainWindow(QtWidgets.QWidget):
     def __init__(self):
@@ -38,6 +38,15 @@ class PLMMainWindow(QtWidgets.QWidget):
         count_layout.addWidget(self.count_label)
         count_layout.addWidget(self.count_display)
         count_layout.addStretch()
+        
+        # Добавляем кнопку MCP сервера
+        from mcp.freecad_mcp_server import FreeCADMCPServer
+        
+        self.mcp_server = None
+        self.toggle_mcp_button = QtWidgets.QPushButton('Start MCP Server')
+        self.toggle_mcp_button.clicked.connect(self.toggle_mcp_server)
+        count_layout.addWidget(self.toggle_mcp_button)
+        
         main_layout.addLayout(count_layout)
         self.update_objects_count()  # Вызываем метод сразу после создания виджетов
 
@@ -453,3 +462,24 @@ class PLMMainWindow(QtWidgets.QWidget):
             CADUtils.create_part_with_brep(part_dto)
         else:
             QtWidgets.QMessageBox.critical(self, 'Error', 'Object found, but no BREP data available!')
+
+    def toggle_mcp_server(self):
+        """Включает или выключает MCP сервер"""
+        try:
+            if not self.mcp_server:
+                # Импортируем только при необходимости
+                from mcp.freecad_mcp_server import FreeCADMCPServer
+                self.mcp_server = FreeCADMCPServer()
+                self.mcp_server.start()
+                self.toggle_mcp_button.setText('Stop MCP Server')
+                log("MCP сервер запущен")
+            else:
+                self.mcp_server.stop()
+                self.mcp_server = None
+                self.toggle_mcp_button.setText('Start MCP Server')
+                log("MCP сервер остановлен")
+        except Exception as e:
+            log(f"Ошибка при управлении MCP сервером: {str(e)}")
+            QtWidgets.QMessageBox.warning(
+                self, 'MCP Server Error', f'Произошла ошибка: {str(e)}'
+            )

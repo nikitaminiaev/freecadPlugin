@@ -7,7 +7,7 @@ from PySide2 import QtWidgets, QtCore
 from socket_client import create_websocket_client
 import traceback
 from freecad_executor import FreeCADExecutor
-from logger import log
+from utils.logger import log
 from function_registry import FunctionRegistry
 
 class PLMClientPanel(QtWidgets.QWidget):

@@ -8,7 +8,7 @@ from socket_client import create_websocket_client
 # Добавляем импорт для выполнения кода
 import traceback
 from freecad_executor import FreeCADExecutor
-from logger import log
+from utils.logger import log
 
 class PLMClientWindow(QtWidgets.QWidget):
     # Сигнал для обновления UI из другого потока

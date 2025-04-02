@@ -2,3 +2,4 @@
 /makefile
 .idea/*
 /freecad_mcp/
+tmp/*

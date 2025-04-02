@@ -1,6 +1,6 @@
 import traceback
 from function_registry import FunctionRegistry
-from logger import log
+from utils.logger import log
 
 class PLMFunctions:
     """

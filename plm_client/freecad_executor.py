@@ -9,7 +9,7 @@ import os
 import importlib
 import json
 from typing import Dict, Any, Callable
-from logger import log
+from utils.logger import log
 
 
 class FreeCADExecutor:
@@ -116,7 +116,7 @@ class FreeCADExecutor:
                     
             # Добавляем утилиты CAD, если они доступны
             try:
-                from cad_utils import CADUtils, Coordinates, PartCreationDTO
+                from utils.cad_utils import CADUtils, Coordinates, PartCreationDTO
                 local_vars['CADUtils'] = CADUtils
                 local_vars['Coordinates'] = Coordinates
                 local_vars['PartCreationDTO'] = PartCreationDTO

@@ -1,5 +1,8 @@
 from dataclasses import dataclass
-from typing import Optional, Dict, List, Union
+from typing import Any, Optional, Dict, List, Union
+import os
+import tempfile
+from utils.logger import log
 
 @dataclass
 class Coordinates:
@@ -62,6 +65,15 @@ class PartCreationDTO:
 
         return result
 
+VIEW_COMMANDS = {
+    "front": "Std_ViewFront",        # Вид спереди
+    "top": "Std_ViewTop",          # Вид сверху
+    "right": "Std_ViewRight",        # Вид справа
+    "left": "Std_ViewLeft",         # Вид слева
+    "rear": "Std_ViewRear",         # Вид сзади
+    "bottom": "Std_ViewBottom",      # Вид снизу
+    "isometric": "Std_ViewIsometric" # Альтернативное имя для изометрии
+}
 
 class CADUtils:
     @staticmethod
@@ -281,3 +293,133 @@ class CADUtils:
             
         except Exception as e:
             raise Exception(f'Не удалось получить объединенный BREP: {str(e)}')
+
+    @staticmethod
+    def get_object_by_label(label: str) -> Optional[Any]:
+        """Находит первый объект в активном документе по его свойству Label.
+
+        Args:
+            label (str): Имя (Label) объекта для поиска.
+
+        Returns:
+            Optional[Any]: Найденный объект FreeCAD или None, если объект с таким Label не найден.
+
+        Raises:
+            Exception: Если нет активного документа.
+        """
+        try:
+            import FreeCAD
+            doc = FreeCAD.ActiveDocument
+            if not doc:
+                # Можно просто вернуть None или вывести предупреждение,
+                # но выброс исключения более явно сообщает о проблеме.
+                raise Exception("Нет активного документа для поиска объекта.")
+
+            # Перебираем все объекты в документе
+            for obj in doc.Objects:
+                # Проверяем, есть ли у объекта свойство Label и совпадает ли оно
+                if hasattr(obj, 'Label') and obj.Label == label:
+                    return obj # Возвращаем первый найденный объект
+
+            # Если цикл завершился, а объект не найден
+            return None
+
+        except Exception as e:
+            return None
+
+    @staticmethod
+    def set_standard_view(view_type: str):
+        """Устанавливает стандартный вид (спереди, сверху, изометрия и т.д.).
+
+        Args:
+            view_type (str): Тип вида. Допустимые значения (регистронезависимые):
+                             'front', 'top', 'right', 'left', 'rear', 'bottom', 'iso'/'isometric'.
+        """
+        try:
+            import FreeCADGui as Gui
+            if not Gui.ActiveDocument or not hasattr(Gui.ActiveDocument, 'ActiveView'):
+                raise Exception("Active document or view not found.")
+
+            command = VIEW_COMMANDS.get(view_type.lower())
+
+            if command:
+                Gui.runCommand(command, 0) # Выполняем команду установки вида
+            else:
+                valid_views = ", ".join(VIEW_COMMANDS.keys())
+                raise ValueError(f"Unknown view type: '{view_type}'. Available standard views: {valid_views}")
+
+        except Exception as e:
+            raise Exception(f"Failed to set standard view: {str(e)}")
+        
+    @staticmethod
+    def capture_view(file_path: Optional[str] = None, width: Optional[int] = None, height: Optional[int] = None) -> Optional[bytes]:
+        """Захватывает текущий активный вид в виде изображения.
+
+        Args:
+            file_path (Optional[str]): Путь для сохранения файла изображения.
+                                       Если None, изображение возвращается как байты.
+                                       Формат файла определяется расширением (e.g., .png, .jpg).
+            width (Optional[int]): Ширина изображения в пикселях. Если None, используется текущая ширина вида.
+            height (Optional[int]): Высота изображения в пикселях. Если None, используется текущая высота вида.
+
+        Returns:
+            Optional[bytes]: Бинарные данные изображения (в формате PNG), если file_path равен None.
+                             None, если изображение было сохранено в файл.
+
+        Raises:
+            Exception: Если не удалось получить активный вид или сохранить/прочитать изображение.
+        """
+        try:
+            import FreeCADGui as Gui
+            
+            # Проверяем, есть ли активный документ и вид в GUI
+            if not Gui.ActiveDocument or not hasattr(Gui.ActiveDocument, 'ActiveView'):
+                 raise Exception("Активный документ или вид не найден.")
+
+            view = Gui.ActiveDocument.ActiveView
+
+            # Определяем размеры: если не заданы, используем текущие размеры вида
+            # Обратите внимание: получение текущих размеров может быть не всегда надежно,
+            # лучше явно указывать размеры, если это возможно.
+            # Здесь мы передаем None в saveImage, если размеры не указаны,
+            # позволяя FreeCAD использовать свои значения по умолчанию или текущие.
+
+            if file_path:
+                # Вариант 1: Сохранение в файл
+                print(f"Сохранение вида в файл: {file_path}")
+                view.saveImage(file_path, width, height)
+                print(f"Вид успешно сохранен в {file_path}")
+                return None
+            else:
+                # Вариант 2: Возврат данных изображения как байтов
+                temp_path = None
+                try:
+                    # Создаем временный файл с расширением .png
+                    fd, temp_path = tempfile.mkstemp(suffix=".png")
+                    os.close(fd) # Закрываем дескриптор, так как saveImage работает с путем
+
+                    log(f"Saving view to temporary file: {temp_path}")
+                    # Сохраняем во временный файл
+                    view.saveImage(temp_path, width, height)
+
+                    log(f"Reading data from temporary file: {temp_path}")
+                    # Читаем бинарные данные из временного файла
+                    with open(temp_path, 'rb') as f:
+                        image_data = f.read()
+                    
+                    log(f"Temporary file read, data size: {len(image_data)} bytes")
+                    return image_data
+
+                finally:
+                    # Гарантированно удаляем временный файл
+                    if temp_path and os.path.exists(temp_path):
+                        try:
+                            os.remove(temp_path)
+                            log(f"Temporary file removed: {temp_path}")
+                        except OSError as e:
+                            log(f"Failed to remove temporary file {temp_path}: {e}")
+
+        except Exception as e:
+            # Логируем или перевыбрасываем исключение
+            log(f"Error capturing view: {str(e)}")
+            raise Exception(f"Error capturing view: {str(e)}") 

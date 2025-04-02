@@ -37,6 +37,7 @@ class MyWorkbench(FreeCADGui.Workbench):
 
     def Initialize(self):
         self.appendToolbar('My Toolbar', ['MyFormCommand'])
+        self.appendMenu('PLM', ['MyFormCommand'])
 
     def GetClassName(self):
         return 'Gui::PythonWorkbench'

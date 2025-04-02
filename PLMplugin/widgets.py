@@ -1,7 +1,7 @@
 from PySide2 import QtWidgets, QtCore
 from models import BasicObject
 import json
-from logger import log
+from utils.logger import log
 
 class ObjectTreeWidget(QtWidgets.QTreeWidget):
     def __init__(self, parent=None):

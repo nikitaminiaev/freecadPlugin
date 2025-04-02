@@ -1,7 +1,8 @@
 import json
 import http.client
 import time
-from logger import log
+from utils.logger import log
+
 class APIClient:
     def __init__(self, host="localhost", port=8000):
         self.host = host
