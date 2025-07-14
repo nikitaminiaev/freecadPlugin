@@ -423,3 +423,81 @@ class CADUtils:
             # Логируем или перевыбрасываем исключение
             log(f"Error capturing view: {str(e)}")
             raise Exception(f"Error capturing view: {str(e)}") 
+
+    @staticmethod
+    def normalize_shape(shape, tol=1e-6):
+        import numpy as np
+        import FreeCAD
+        # Центрируем форму (переносим центр массы в начало координат)
+        bb = shape.BoundBox
+        center = FreeCAD.Vector((bb.XMin + bb.XMax)/2, (bb.YMin + bb.YMax)/2, (bb.ZMin + bb.ZMax)/2)
+        translated_shape = shape.copy()
+        translated_shape.translate(-center)
+
+        # Получаем точки с поверхности через tessellate
+        triangles = translated_shape.tessellate(0.5)[0]  # 0.5 - шаг дискретизации
+        if not triangles:
+            return translated_shape  # если не удалось дискретизировать, вернём как есть
+    
+        pts_np = np.array(triangles)
+    
+        # Центрируем точки (ещё раз, т.к. tessellate может быть неточным)
+        mean = np.mean(pts_np, axis=0)
+        pts_np -= mean
+    
+        # Вычисляем собственные векторы ковариационной матрицы (PCA)
+        cov = np.cov(pts_np, rowvar=False)
+        eig_vals, eig_vecs = np.linalg.eigh(cov)
+    
+        idx = np.argsort(eig_vals)[::-1]
+        eig_vecs = eig_vecs[:, idx]  # Упорядочиваем по убыванию
+    
+        # Формируем матрицу поворота из собственных векторов
+        rot_matrix = FreeCAD.Matrix()
+        rot_matrix.A11, rot_matrix.A12, rot_matrix.A13 = eig_vecs[0, 0], eig_vecs[1, 0], eig_vecs[2, 0]
+        rot_matrix.A21, rot_matrix.A22, rot_matrix.A23 = eig_vecs[0, 1], eig_vecs[1, 1], eig_vecs[2, 1]
+        rot_matrix.A31, rot_matrix.A32, rot_matrix.A33 = eig_vecs[0, 2], eig_vecs[1, 2], eig_vecs[2, 2]
+    
+        # Поворот формы
+        normalized_shape = translated_shape.copy()
+        normalized_shape.transformGeometry(rot_matrix)
+        return normalized_shape
+
+    @staticmethod
+    def shapes_are_identical(shape1, shape2, tol=1e-6):
+        # Нормализуем обе формы
+        norm_shape1 = CADUtils.normalize_shape(shape1, tol)
+        norm_shape2 = CADUtils.normalize_shape(shape2, tol)
+        # Сравнение габаритных прямоугольников
+        bb1, bb2 = norm_shape1.BoundBox, norm_shape2.BoundBox
+        if (abs(bb1.XMin - bb2.XMin) > tol or abs(bb1.XMax - bb2.XMax) > tol or
+            abs(bb1.YMin - bb2.YMin) > tol or abs(bb1.YMax - bb2.YMax) > tol or
+            abs(bb1.ZMin - bb2.ZMin) > tol or abs(bb1.ZMax - bb2.ZMax) > tol):
+            return False
+        # Сравнение объёмов
+        if abs(norm_shape1.Volume - norm_shape2.Volume) > tol:
+            return False
+
+        # Булевы операции разности
+        diff1 = norm_shape1.cut(norm_shape2)
+        diff2 = norm_shape2.cut(norm_shape1)
+        if diff1.Volume > tol or diff2.Volume > tol:
+            return False
+        return True
+
+    @staticmethod
+    def object_are_identical(obj1_name, obj2_name, tol=1e-6):
+        import FreeCAD as App
+        obj1 = App.ActiveDocument.getObject(obj1_name).Shape
+        obj2 = App.ActiveDocument.getObject(obj2_name).Shape
+        return CADUtils.shapes_are_identical(obj1, obj2, tol)
+    
+if __name__ == "__main__":
+    shape1 = App.ActiveDocument.getObject("Body").Shape
+
+    shape2 = App.ActiveDocument.getObject("Body004").Shape
+
+    if CADUtils.shapes_are_identical(shape1, shape2):
+        print("Детали идентичны по геометрии (с приведением к общему виду).")
+    else:
+        print("Детали отличаются по геометрии.")

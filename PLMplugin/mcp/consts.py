@@ -2,3 +2,4 @@
 
 FREECAD_HOST = 'localhost'
 FREECAD_PORT = 9877
+TMP_DIR = '/media/ssd_1_9tb/PycharmProjects/freecadPlugin/tmp'

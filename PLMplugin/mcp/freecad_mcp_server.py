@@ -1,7 +1,7 @@
 import json
 import socket
 import traceback
-from consts import FREECAD_HOST, FREECAD_PORT
+from .consts import FREECAD_HOST, FREECAD_PORT, TMP_DIR
 from PySide2 import QtCore, QtWidgets
 import FreeCAD as App
 import FreeCADGui as Gui
@@ -145,15 +145,10 @@ class FreeCADMCPServer:
         try:
             from mcp.mcp_tools import PartViewCapture
             import os
-            
-            tmp_dir = '/media/ssd_1_9tb/PycharmProjects/freecadPlugin/tmp'
-            
-            # Генерируем имя файла с timestamp для уникальности
             import time
             filename = f"{part_name}_{view_type}_{int(time.time())}.png"
-            target_path = os.path.join(tmp_dir, filename)
+            target_path = os.path.join(TMP_DIR, filename)
             
-            # Получаем изображение
             PartViewCapture.capture_part_view(part_name, view_type, file_path=target_path)
             
             return {

@@ -94,6 +94,54 @@ async def capture_part_view(part_name: str, view_type: str) -> str:
         }
         return json.dumps(error_result, indent=2)
 
+@mcp.tool()
+async def compare_objects(obj1_name: str, obj2_name: str, tolerance: float = 1e-6) -> str:
+    """Сравнивает два объекта FreeCAD на идентичность их геометрии.
+    
+    Args:
+        obj1_name: Имя первого объекта для сравнения.
+        obj2_name: Имя второго объекта для сравнения.
+        tolerance: Допустимая погрешность при сравнении (по умолчанию 1e-6).
+    
+    Returns:
+        JSON-строка, содержащая результат сравнения.
+    """
+    try:
+        script = f"""
+import FreeCAD as App
+from utils.cad_utils import CADUtils
+
+try:
+    if not App.ActiveDocument:
+        raise Exception("Нет активного документа. Перед сравнением объектов нужно создать или открыть документ.")
+    identical = CADUtils.object_are_identical("{obj1_name}", "{obj2_name}", {tolerance})
+    result = {{"success": True, "identical": identical}}
+except Exception as e:
+    import traceback
+    result = {{"success": False, "error": str(e), "traceback": traceback.format_exc()}}
+"""
+        
+        # Отправляем скрипт через сокет
+        command = {
+            "type": "run_script",
+            "params": {
+                "script": script
+            }
+        }
+        
+        result = await send_to_freecad(command)
+        return json.dumps(result, indent=2)
+        
+    except Exception as e:
+        error_result = {
+            'success': False,
+            'message': 'Ошибка при сравнении объектов',
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }
+        return json.dumps(error_result, indent=2)
+
+
 if __name__ == "__main__":
     # Инициализация и запуск сервера
     mcp.run(transport='stdio') 
