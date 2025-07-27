@@ -146,14 +146,20 @@ class FreeCADMCPServer:
             from mcp.mcp_tools import PartViewCapture
             import os
             import time
+            import base64
             filename = f"{part_name}_{view_type}_{int(time.time())}.png"
             target_path = os.path.join(TMP_DIR, filename)
             
             PartViewCapture.capture_part_view(part_name, view_type, file_path=target_path)
             
+            with open(target_path, "rb") as image_file:
+                image_base64 = base64.b64encode(image_file.read()).decode('utf-8')
+            
             return {
                 "success": True,
-                "image_data": target_path
+                "filename": filename,
+                "filepath": target_path,
+                "image_base64": image_base64
             }
         except Exception as e:
             return {
