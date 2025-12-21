@@ -252,6 +252,11 @@ class PLMMainWindow(QtWidgets.QWidget):
                 )
 
             data = json.loads(response)
+            
+            # Если вернулся список, берем первый элемент
+            if isinstance(data, list) and data:
+                data = data[0]
+
             if isinstance(data, dict):
                 if 'error' in data:
                     QtWidgets.QMessageBox.critical(self, 'Error', str(data['error']))
