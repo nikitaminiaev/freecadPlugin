@@ -29,18 +29,32 @@ class ObjectTreeWidget(QtWidgets.QTreeWidget):
 
     def display_hierarchical_results(self, objects, is_search_result=False, load_callback=None):
         self.clear()
-        self.load_callback = load_callback  # Сохраняем callback
+        self.load_callback = load_callback
         objects_dict = {obj.id: obj for obj in objects}
 
-        if is_search_result:
-            for obj in objects:
-                self._add_object_to_tree(obj, objects_dict, load_callback=load_callback)
-        else:
-            for obj in objects:
-                if not obj.parents:
+        try:
+            if is_search_result:
+                for obj in objects:
                     self._add_object_to_tree(obj, objects_dict, load_callback=load_callback)
+            else:
+                for obj in objects:
+                    if not obj.parents:
+                        self._add_object_to_tree(obj, objects_dict, load_callback=load_callback)
+        except Exception as e:
+            log(f"Error while building tree: {str(e)}")
+            # Не очищаем дерево, чтобы показать уже добавленные объекты
 
-    def _add_object_to_tree(self, obj, objects_dict, parent_item=None, load_callback=None):
+    def _add_object_to_tree(self, obj, objects_dict, parent_item=None, load_callback=None, visited=None):
+        if visited is None:
+            visited = set()
+            
+        if obj.id in visited:
+            # Защита от бесконечной рекурсии при циклических ссылках
+            log(f"Circular dependency detected for object {obj.id}, skipping child expansion")
+            return
+            
+        visited.add(obj.id)
+        
         item = QtWidgets.QTreeWidgetItem([
             str(obj.name),
             str(obj.id)
@@ -55,12 +69,12 @@ class ObjectTreeWidget(QtWidgets.QTreeWidget):
 
         # Создаем QLineEdit для отображения имени
         name_line_edit = QtWidgets.QLineEdit(str(obj.name))
-        name_line_edit.setReadOnly(True)  # Делаем поле только для чтения
+        name_line_edit.setReadOnly(True)
         self.setItemWidget(item, 0, name_line_edit)
 
         # Создаем QLineEdit для отображения ID
         id_line_edit = QtWidgets.QLineEdit(str(obj.id))
-        id_line_edit.setReadOnly(True)  # Делаем поле только для чтения
+        id_line_edit.setReadOnly(True)
         self.setItemWidget(item, 1, id_line_edit)
 
         button_widget = self._create_button_widget(obj.id, load_callback)
@@ -75,7 +89,7 @@ class ObjectTreeWidget(QtWidgets.QTreeWidget):
                     'children': [],
                     'parents': [obj.id]
                 })
-            self._add_object_to_tree(child_obj, objects_dict, item, load_callback)
+            self._add_object_to_tree(child_obj, objects_dict, item, load_callback, visited.copy())
 
     def _create_button_widget(self, part_id, load_callback=None):
         button_widget = QtWidgets.QWidget()
