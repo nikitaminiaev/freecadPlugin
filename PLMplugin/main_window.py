@@ -39,9 +39,6 @@ class PLMMainWindow(QtWidgets.QWidget):
         count_layout.addWidget(self.count_display)
         count_layout.addStretch()
         
-        # Добавляем кнопку MCP сервера
-        from mcp.freecad_mcp_server import FreeCADMCPServer
-        
         self.mcp_server = None
         self.toggle_mcp_button = QtWidgets.QPushButton('Start MCP Server')
         self.toggle_mcp_button.clicked.connect(self.toggle_mcp_server)
@@ -71,6 +68,10 @@ class PLMMainWindow(QtWidgets.QWidget):
         self.findAllButton = QtWidgets.QPushButton('Find All')
         self.uploadActiveButton = QtWidgets.QPushButton('Save')
 
+        # Checkboxes for is_assembly and is_shell
+        self.isAssemblyCheckbox = QtWidgets.QCheckBox('Is Assembly')
+        self.isShellCheckbox = QtWidgets.QCheckBox('Is Shell')
+
         # New buttons
         self.goToSupersystemButton = QtWidgets.QPushButton('To Supersystem')
         self.goToSubsystemButton = QtWidgets.QPushButton('To Subsystem')
@@ -94,6 +95,8 @@ class PLMMainWindow(QtWidgets.QWidget):
         search_layout.addWidget(self.submitButton)
         search_layout.addWidget(self.findAllButton)
         search_layout.addWidget(self.uploadActiveButton)
+        search_layout.addWidget(self.isAssemblyCheckbox)
+        search_layout.addWidget(self.isShellCheckbox)
         search_layout.addWidget(self.goToSupersystemButton)
         search_layout.addWidget(self.goToSubsystemButton)
         search_layout.addWidget(self.loadInCurrentDocButton)
@@ -164,15 +167,16 @@ class PLMMainWindow(QtWidgets.QWidget):
             if not selected_objs:
                 QtWidgets.QMessageBox.warning(self, 'Warning', 'No object selected in FreeCAD!')
                 return
-            
-            is_assembly = len(selected_objs) > 1
+
+            is_assembly = self.isAssemblyCheckbox.isChecked()
+            is_shell = self.isShellCheckbox.isChecked()
             parrent_id = None
 
             if is_assembly:
                 parrent_dto = PartCreationDTO(brep_string=CADUtils.get_combined_brep_from_objects(selected_objs), label=active_doc.Label)
                 if doc_id:
                     parrent_dto.id = doc_id
-                parrent_id = self._upload_single_object(parrent_dto, author, None, is_assembly)
+                parrent_id = self._upload_single_object(parrent_dto, author, None, is_assembly, is_shell)
                 if parrent_id:
                     CADUtils.set_id(active_doc, parrent_id)
             child_ids = {}
@@ -180,7 +184,7 @@ class PLMMainWindow(QtWidgets.QWidget):
                 part_dto = CADUtils.create_dto_from_object(selected_obj)
                 if comment:
                     part_dto.id = comment[part_dto.label]
-                obj_id = self._upload_single_object(part_dto, author, getattr(active_doc, 'Id', None), is_assembly)
+                obj_id = self._upload_single_object(part_dto, author, getattr(active_doc, 'Id', None), is_assembly, is_shell)
                 try:
                     if hasattr(selected_obj, 'Id'):
                         selected_obj.Id = obj_id
@@ -198,7 +202,7 @@ class PLMMainWindow(QtWidgets.QWidget):
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred while uploading: {str(e)}')
 
-    def _upload_single_object(self, part_dto, author, parent_id, is_assembly):
+    def _upload_single_object(self, part_dto, author, parent_id, is_assembly, is_shell):
         """Upload a single object and return its ID"""
         label = part_dto.label.encode().decode('utf-8')
         
@@ -213,6 +217,7 @@ class PLMMainWindow(QtWidgets.QWidget):
 
         payload = {
             "is_assembly": is_assembly,
+            "is_shell": is_shell,
             "brep_files": {
                 "brep_string": part_dto.brep_string
             },
