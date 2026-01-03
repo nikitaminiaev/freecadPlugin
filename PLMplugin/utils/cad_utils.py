@@ -37,7 +37,7 @@ class PartCreationDTO:
             coordinates=coords
         )
     """
-    brep_string: str
+    brep_string: Optional[str]
     id: Optional[str] = None
     label: Optional[str] = "NewPart"
     coordinates: Optional[Coordinates] = None

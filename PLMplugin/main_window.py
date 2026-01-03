@@ -170,21 +170,35 @@ class PLMMainWindow(QtWidgets.QWidget):
 
             is_assembly = self.isAssemblyCheckbox.isChecked()
             is_shell = self.isShellCheckbox.isChecked()
-            parrent_id = None
+            parent_id = None
 
             if is_assembly:
-                parrent_dto = PartCreationDTO(brep_string=CADUtils.get_combined_brep_from_objects(selected_objs), label=active_doc.Label)
+                # Сборка не сохраняет BREP напрямую, она берет его из детей Shell
+                parent_dto = PartCreationDTO(brep_string=None, label=active_doc.Label)
                 if doc_id:
-                    parrent_dto.id = doc_id
-                parrent_id = self._upload_single_object(parrent_dto, author, None, is_assembly, is_shell)
-                if parrent_id:
-                    CADUtils.set_id(active_doc, parrent_id)
+                    parent_dto.id = doc_id
+                parent_id = self._upload_single_object(parent_dto, author, None, is_assembly=True, is_shell=False)
+                if parent_id:
+                    CADUtils.set_id(active_doc, parent_id)
+            
             child_ids = {}
             for selected_obj in selected_objs:
                 part_dto = CADUtils.create_dto_from_object(selected_obj)
-                if comment:
+                if comment and part_dto.label in comment:
                     part_dto.id = comment[part_dto.label]
-                obj_id = self._upload_single_object(part_dto, author, getattr(active_doc, 'Id', None), is_assembly, is_shell)
+                
+                # Если сохраняем сборку, то все дочерние тела помечаем как Shell
+                # В противном случае используем флаги из чекбоксов
+                current_is_assembly = False if is_assembly else is_assembly
+                current_is_shell = True if is_assembly else is_shell
+                
+                obj_id = self._upload_single_object(
+                    part_dto, 
+                    author, 
+                    parent_id or getattr(active_doc, 'Id', None), 
+                    current_is_assembly, 
+                    current_is_shell
+                )
                 try:
                     if hasattr(selected_obj, 'Id'):
                         selected_obj.Id = obj_id
@@ -219,7 +233,7 @@ class PLMMainWindow(QtWidgets.QWidget):
             "is_assembly": is_assembly,
             "is_shell": is_shell,
             "brep_files": {
-                "brep_string": part_dto.brep_string
+                "brep_string": part_dto.brep_string if part_dto.brep_string else ""
             },
             "name": label,
             "author": author,
@@ -419,7 +433,7 @@ class PLMMainWindow(QtWidgets.QWidget):
             CADUtils.close_active_doc()
             active_doc = CADUtils.create_new_doc(f"Document_{obj_id}")
 
-            self._load_object(obj_id)
+            self._load_object(obj_id, is_recursive_call=False)
             CADUtils.recompute_doc()
             CADUtils.set_id(active_doc, obj_id)
         except Exception as e:
@@ -435,27 +449,45 @@ class PLMMainWindow(QtWidgets.QWidget):
                 QtWidgets.QMessageBox.critical(self, 'Error', 'no active doc!')
                 return
 
-            self._load_object(obj_id)
+            self._load_object(obj_id, is_recursive_call=False)
             CADUtils.recompute_doc()
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred while loading the object: {str(e)}')
 
         self.last_opened_obj_ids.append(obj_id)
 
-    def _load_object(self, obj_id, max_depth=1):
+    def _load_object(self, obj_id, max_depth=10, is_recursive_call=False):
         response = self.api_client.send_get_request(
             "/api/basic_object/{id}",
             path_params={"id": obj_id}
         )
         data = json.loads(response)
-        obj = BasicObject(data)
-
-        if max_depth > 0 and hasattr(obj, 'children') and obj.children:
-            for child_id in obj.children:
-                self._load_object(child_id, max_depth - 1)
+        obj = BasicObject.from_response(data)
+        
+        if not obj:
+            log(f"Failed to load object with ID: {obj_id}")
             return
 
-        if obj.brep_string:
+        # Если это сборка и мы можем идти глубже, загружаем детей
+        if obj.is_assembly and max_depth > 0 and obj.children:
+            log(f"Loading assembly {obj.name} with {len(obj.children)} children")
+            for child_id in obj.children:
+                # Рекурсивно вызываем загрузку для детей, помечая что это вызов из сборки
+                self._load_object(child_id, max_depth - 1, is_recursive_call=True)
+            return
+
+        # Логика загрузки геометрии:
+        # 1. Если это прямой вызов (не из сборки), грузим всегда, если есть BREP
+        # 2. Если это вызов из сборки, грузим только если is_shell=True
+        should_load_geometry = False
+        if not is_recursive_call and obj.brep_string:
+            should_load_geometry = True
+            log(f"Direct load: creating part for {obj.name}")
+        elif is_recursive_call and obj.is_shell:
+            should_load_geometry = True
+            log(f"Assembly load: creating shell part for {obj.name}")
+
+        if should_load_geometry:
             part_dto = PartCreationDTO(
                 brep_string=obj.brep_string,
                 id=obj.id,
@@ -471,7 +503,8 @@ class PLMMainWindow(QtWidgets.QWidget):
 
             CADUtils.create_part_with_brep(part_dto)
         else:
-            QtWidgets.QMessageBox.critical(self, 'Error', 'Object found, but no BREP data available!')
+            reason = "is_shell is False in assembly" if is_recursive_call else "no BREP data"
+            log(f"Skipping object {obj.name} (ID: {obj_id}) - {reason}")
 
     def toggle_mcp_server(self):
         """Включает или выключает MCP сервер"""
