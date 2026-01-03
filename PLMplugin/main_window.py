@@ -192,10 +192,11 @@ class PLMMainWindow(QtWidgets.QWidget):
                 current_is_assembly = False if is_assembly else is_assembly
                 current_is_shell = True if is_assembly else is_shell
                 
+                # Передаем parent_id только если мы в режиме сборки (parent_id задан)
                 obj_id = self._upload_single_object(
                     part_dto, 
                     author, 
-                    parent_id or getattr(active_doc, 'Id', None), 
+                    parent_id, 
                     current_is_assembly, 
                     current_is_shell
                 )
@@ -247,6 +248,9 @@ class PLMMainWindow(QtWidgets.QWidget):
             payload["parent_id"] = parent_id
 
         existing_id = part_dto.id
+
+        if parent_id and parent_id != existing_id:
+            payload["parent_id"] = parent_id
 
         try:
             if existing_id:
