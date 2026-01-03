@@ -12,7 +12,7 @@ class ObjectTreeWidget(QtWidgets.QTreeWidget):
         self.itemExpanded.connect(self.on_item_expanded)
 
     def setup_ui(self):
-        headers = ['Name', 'ID', 'Actions']
+        headers = ['Name', 'ID', 'Assembly', 'Shell', 'Actions']
         self.setColumnCount(len(headers))
         self.setHeaderLabels(headers)
 
@@ -20,10 +20,14 @@ class ObjectTreeWidget(QtWidgets.QTreeWidget):
 
         header.setSectionResizeMode(0, QtWidgets.QHeaderView.Interactive)
         header.setSectionResizeMode(1, QtWidgets.QHeaderView.Interactive)
-        header.setSectionResizeMode(2, QtWidgets.QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QtWidgets.QHeaderView.Interactive)
+        header.setSectionResizeMode(3, QtWidgets.QHeaderView.Interactive)
+        header.setSectionResizeMode(4, QtWidgets.QHeaderView.Stretch)
 
-        self.setColumnWidth(0, 240)
-        self.setColumnWidth(1, 270)
+        self.setColumnWidth(0, 180)
+        self.setColumnWidth(1, 150)
+        self.setColumnWidth(2, 70)
+        self.setColumnWidth(3, 70)
 
         self.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
 
@@ -57,7 +61,9 @@ class ObjectTreeWidget(QtWidgets.QTreeWidget):
         
         item = QtWidgets.QTreeWidgetItem([
             str(obj.name),
-            str(obj.id)
+            str(obj.id),
+            "Yes" if obj.is_assembly else "No",
+            "Yes" if obj.is_shell else "No"
         ])
 
         item.setData(0, QtCore.Qt.UserRole, obj.id)
@@ -78,7 +84,7 @@ class ObjectTreeWidget(QtWidgets.QTreeWidget):
         self.setItemWidget(item, 1, id_line_edit)
 
         button_widget = self._create_button_widget(obj.id, load_callback)
-        self.setItemWidget(item, 2, button_widget)
+        self.setItemWidget(item, 4, button_widget)
 
         # Рекурсивное добавление дочерних элементов
         for child_id in obj.children:
@@ -112,7 +118,7 @@ class ObjectTreeWidget(QtWidgets.QTreeWidget):
         obj_id = item.data(0, QtCore.Qt.UserRole)
         
         # Показываем индикатор загрузки
-        loading_item = QtWidgets.QTreeWidgetItem(["Loading...", "", ""])
+        loading_item = QtWidgets.QTreeWidgetItem(["Loading...", "", "", "", ""])
         item.addChild(loading_item)
         
         try:
@@ -137,6 +143,6 @@ class ObjectTreeWidget(QtWidgets.QTreeWidget):
             item.setData(0, QtCore.Qt.UserRole + 1, True)
         except Exception as e:
             item.takeChildren()
-            error_item = QtWidgets.QTreeWidgetItem(["Error loading children", "", ""])
+            error_item = QtWidgets.QTreeWidgetItem(["Error loading children", "", "", "", ""])
             item.addChild(error_item)
             log(f"Error loading children for object {obj_id}: {str(e)}")
