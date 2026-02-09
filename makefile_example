@@ -1,0 +1,5 @@
+cp-plugin-to-freecad:
+	cp -r ./PLMplugin /home/user/snap/freecad/common/Mod/
+
+cp-plm-client-to-freecad:
+	cp -r ./plm_client /home/user/.local/share/FreeCAD/Mod/

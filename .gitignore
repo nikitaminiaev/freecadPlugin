@@ -1,1 +1,7 @@
 /venv/
+/makefile
+.idea/*
+/freecad_mcp/
+tmp/*
+AGENTS.md
+opencode.json

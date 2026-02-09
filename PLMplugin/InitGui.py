@@ -22,7 +22,7 @@ class MyPlugin:
         return {
             'Pixmap': '',
             'MenuText': 'Open PLM Form',
-            'ToolTip': 'Open a custom form with HTTP requests'
+            'ToolTip': 'Open a custom form with HTTP requests and WebSocket client'
         }
 
 
@@ -32,11 +32,12 @@ FreeCADGui.addCommand('MyFormCommand', MyPlugin())
 class MyWorkbench(FreeCADGui.Workbench):
     def __init__(self):
         self.__class__.MenuText = 'PLM'
-        self.__class__.ToolTip = 'Custom workbench'
+        self.__class__.ToolTip = 'PLM integration with WebSocket client support'
         self.__class__.Icon = ''
 
     def Initialize(self):
         self.appendToolbar('My Toolbar', ['MyFormCommand'])
+        self.appendMenu('PLM', ['MyFormCommand'])
 
     def GetClassName(self):
         return 'Gui::PythonWorkbench'

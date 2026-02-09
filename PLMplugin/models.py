@@ -2,21 +2,40 @@ class BasicObject:
     def __init__(self, data: dict):
         self.id = data.get('id')
         self.name = data.get('name', 'N/A')
-        self.children = data.get('children', [])
-        self.parents = data.get('parents', [])
-        # Handle case where bounding_contour is None
-        bounding_contour = data.get('bounding_contour', {})
+        self.children: list[str] = data.get('children', [])
+        self.parents: list[str] = data.get('parents', [])
+
+        # Поля is_assembly и is_shell теперь находятся внутри bounding_contour
+        bounding_contour = data.get('bounding_contour') or {}
         if bounding_contour is None:
+             bounding_contour = {}
+             
+        self.is_assembly = bounding_contour.get('is_assembly', False)
+        self.is_shell = bounding_contour.get('is_shell', False)
+
+        # Обработка случая, когда coordinates равно None
+        coordinates = data.get('coordinates') or {}
+        self.coordinates = {
+            "x": coordinates.get('x', 0.0),
+            "y": coordinates.get('y', 0.0),
+            "z": coordinates.get('z', 0.0),
+            "angle": coordinates.get('angle', 0.0),
+            "axis": coordinates.get('axis', {}) or {"x": 0.0, "y": 0.0, "z": 0.0}
+        }
+        
+        brep_files = bounding_contour.get('brep_files', {})
+        if brep_files is None:
             self.file_path = None
+            self.brep_string = None
         else:
-            brep_files = bounding_contour.get('brep_files', {})
-            if brep_files is None:
-                self.file_path = None
-            else:
-                self.file_path = brep_files.get('path')
+            self.file_path = brep_files.get('path')
+            self.brep_string = brep_files.get('brep_string')
 
     @classmethod
     def from_response(cls, response_data):
+        if not response_data:
+            return None
+            
         if isinstance(response_data, list):
             return [cls(obj) for obj in response_data]
         elif isinstance(response_data, dict):
