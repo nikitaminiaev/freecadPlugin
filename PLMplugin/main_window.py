@@ -387,6 +387,10 @@ class PLMMainWindow(QtWidgets.QWidget):
             except:
                 obj_id = self.get_object_id_from_plm_select()
 
+            if obj_id is None:
+                QtWidgets.QMessageBox.information(self, 'Info', 'Please select any object')
+                return
+
             # Fetch the parents of the object
             response = self.api_client.send_get_request(
                 "/api/basic_object/{id}/parent_ids",
@@ -402,15 +406,64 @@ class PLMMainWindow(QtWidgets.QWidget):
                 self.load_object_in_new_doc(parent_ids[0])
                 return
 
-            for parent_id in parent_ids:
-                if parent_id in self.last_opened_obj_ids:
-                    self.load_object_in_new_doc(parent_id)
-                    return
+            last_opened_parent_id = self._get_last_opened_parent_id(parent_ids)
+            if last_opened_parent_id:
+                self.load_object_in_new_doc(last_opened_parent_id)
+                return
 
-            #todo далее кейс когда надо показывать окно с выбором парента
+            selected_parent_id = self._ask_user_to_select_parent(parent_ids)
+            if selected_parent_id is None:
+                return
+
+            self.load_object_in_new_doc(selected_parent_id)
 
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
+
+    def _get_last_opened_parent_id(self, parent_ids):
+        """Возвращает последнего открытого родителя из списка parent_ids."""
+        available_parent_ids = set(parent_ids)
+        for opened_id in reversed(self.last_opened_obj_ids):
+            if opened_id not in available_parent_ids:
+                continue
+            return opened_id
+        return None
+
+    def _ask_user_to_select_parent(self, parent_ids):
+        """Показывает диалог выбора родителя и возвращает его ID."""
+        parent_titles = []
+        for parent_id in parent_ids:
+            parent_name = self._get_object_name_by_id(parent_id)
+            parent_title = f"{parent_name} ({parent_id})" if parent_name else str(parent_id)
+            parent_titles.append(parent_title)
+
+        selected_parent_title, is_selected = QtWidgets.QInputDialog.getItem(
+            self,
+            'Выбор родителя',
+            'Выберите родительский объект:',
+            parent_titles,
+            0,
+            False
+        )
+        if not is_selected or not selected_parent_title:
+            return None
+
+        selected_index = parent_titles.index(selected_parent_title)
+        return parent_ids[selected_index]
+
+    def _get_object_name_by_id(self, obj_id):
+        """Возвращает имя объекта по ID для отображения в UI."""
+        try:
+            response = self.api_client.send_get_request(
+                "/api/basic_object/{id}",
+                path_params={"id": obj_id}
+            )
+            data = json.loads(response)
+            if isinstance(data, dict):
+                return data.get('name')
+            return None
+        except Exception:
+            return None
 
     def get_object_id_from_plm_select(self):
         selected_objects = self.resultsTree.selectedItems()
@@ -492,17 +545,21 @@ class PLMMainWindow(QtWidgets.QWidget):
             log(f"Assembly load: creating shell part for {obj.name}")
 
         if should_load_geometry:
-            part_dto = PartCreationDTO(
-                brep_string=obj.brep_string,
-                id=obj.id,
-                label=obj.name,
-                coordinates=Coordinates(
+            coordinates = None
+            if is_recursive_call:
+                coordinates = Coordinates(
                     x=obj.coordinates["x"],
                     y=obj.coordinates["y"],
                     z=obj.coordinates["z"],
                     angle=obj.coordinates["angle"],
                     axis=obj.coordinates["axis"]
                 )
+
+            part_dto = PartCreationDTO(
+                brep_string=obj.brep_string,
+                id=obj.id,
+                label=obj.name,
+                coordinates=coordinates
             )
 
             CADUtils.create_part_with_brep(part_dto)

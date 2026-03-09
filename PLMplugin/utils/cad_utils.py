@@ -127,9 +127,9 @@ class CADUtils:
             data (PartCreationDTO): Data transfer object containing part creation data
         """
         try:
-            import FreeCAD
+            import FreeCAD as App
             import FreeCADGui as Gui
-            doc = FreeCAD.ActiveDocument
+            doc = App.ActiveDocument
             if not doc:
                 raise Exception("No active document")
 
@@ -137,7 +137,14 @@ class CADUtils:
             body_obj = doc.addObject('Part::Feature', 'Body')
 
             shape = CADUtils._create_shape_from_brep(data.brep_string)
+            if data.coordinates is None:
+                CADUtils._reset_shape_placement(shape)
             body_obj.Shape = shape
+
+            if data.coordinates is None:
+                CADUtils._reset_object_placement(body_obj)
+                CADUtils._reset_object_placement(part_obj)
+
             part_obj.Group = [body_obj]
             CADUtils._set_object_properties(part_obj, data)
 
@@ -208,6 +215,24 @@ class CADUtils:
             return shape
         except Exception as e:
             raise Exception(f'Failed to create shape from BREP: {str(e)}')
+
+    @staticmethod
+    def _reset_shape_placement(shape):
+        """Сбрасывает трансформацию формы к дефолтной."""
+        try:
+            import FreeCAD as App
+            shape.Placement = App.Placement()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _reset_object_placement(obj):
+        """Сбрасывает placement объекта к дефолтному."""
+        try:
+            import FreeCAD as App
+            obj.Placement = App.Placement()
+        except Exception:
+            pass
 
 
     @staticmethod
