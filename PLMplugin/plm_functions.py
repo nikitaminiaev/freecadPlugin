@@ -46,7 +46,8 @@ class PLMFunctions:
         function_registry.register_function("go_to_supersystem", self.go_to_supersystem)
         function_registry.register_function("go_to_subsystem", self.go_to_subsystem)
         function_registry.register_function("upload_active_part", self.upload_active_part)
-        function_registry.register_function("save_active_doc", self.save_active_doc)
+        function_registry.register_function("save_brep", self.save_brep)
+        function_registry.register_function("save_position", self.save_position)
         
         log("PLMFunctions: Функции PLM успешно зарегистрированы")
     
@@ -226,23 +227,14 @@ class PLMFunctions:
             log(error_msg)
             return {"success": False, "error": str(e)}
 
-    def save_active_doc(self, module_id: str, is_assembly: bool = False, is_shell: bool = False):
+    def save_brep(self, module_id: str):
         """
-        Сохраняет активный документ FreeCAD на сервер (вызывается из веб-интерфейса через WebSocket).
-
-        Режим is_assembly=False (одиночное тело):
-            Экспортирует BREP первого найденного тела и обновляет текущий модуль
-            через PATCH /api/basic_object/{module_id} с полем brep_files.
-
-        Режим is_assembly=True (сборка из нескольких тел):
-            Перебирает все объекты типа App::Part, у которых установлен Id.
-            Обновляет координаты дочерних объектов в parent_child_module через
-            PATCH /api/basic_object/{module_id} с полем added_children.
+        Экспортирует BREP первого тела из активного документа FreeCAD
+        и сохраняет его в указанный модуль через PATCH /api/basic_object/{module_id}.
+        Координаты parent_child_module не затрагиваются.
 
         Args:
-            module_id (str): ID модуля в базе данных (из URL страницы деталей).
-            is_assembly (bool): True — режим сборки (только координаты).
-            is_shell (bool): True — тела внутри сборки являются shell-объектами.
+            module_id (str): ID модуля в базе данных.
 
         Returns:
             dict: Результат операции.
@@ -257,44 +249,65 @@ class PLMFunctions:
             if not doc:
                 return {"success": False, "error": "Нет активного документа FreeCAD"}
 
-            api_client = self.main_window.api_client
-
-            if not is_assembly:
-                return self._save_single_body(doc, module_id, is_shell, api_client)
-
-            return self._save_assembly_coordinates(doc, module_id, api_client)
+            return self._save_single_body(doc, module_id, self.main_window.api_client)
 
         except ImportError:
-            error_msg = "Модуль FreeCAD недоступен"
-            log(f"PLMFunctions.save_active_doc: {error_msg}")
-            return {"success": False, "error": error_msg}
+            log("PLMFunctions.save_brep: модуль FreeCAD недоступен")
+            return {"success": False, "error": "Модуль FreeCAD недоступен"}
         except Exception as e:
-            error_msg = f"Ошибка в save_active_doc: {str(e)}\n{traceback.format_exc()}"
-            log(error_msg)
+            log(f"PLMFunctions.save_brep: {e}\n{traceback.format_exc()}")
             return {"success": False, "error": str(e)}
 
-    def _save_single_body(self, doc, module_id: str, is_shell: bool, api_client):
+    def save_position(self, module_id: str):
+        """
+        Обновляет координаты всех дочерних App::Part объектов текущего документа
+        (сборки) через PATCH /api/basic_object/{child_id} с parent_id + coordinates.
+        BREP не затрагивается.
+
+        Args:
+            module_id (str): ID родительского модуля (сборки) в базе данных.
+
+        Returns:
+            dict: Результат операции.
+        """
+        if not self.main_window:
+            return {"success": False, "error": "Главное окно не инициализировано"}
+
+        try:
+            import FreeCAD
+
+            doc = FreeCAD.ActiveDocument
+            if not doc:
+                return {"success": False, "error": "Нет активного документа FreeCAD"}
+
+            return self._save_assembly_coordinates(doc, module_id, self.main_window.api_client)
+
+        except ImportError:
+            log("PLMFunctions.save_position: модуль FreeCAD недоступен")
+            return {"success": False, "error": "Модуль FreeCAD недоступен"}
+        except Exception as e:
+            log(f"PLMFunctions.save_position: {e}\n{traceback.format_exc()}")
+            return {"success": False, "error": str(e)}
+
+    def _save_single_body(self, doc, module_id: str, api_client):
         """
         Находит первое тело с Shape в документе, экспортирует BREP и патчит модуль.
-        Сохраняет флаг is_shell и сбрасывает is_assembly (одиночная деталь — не сборка).
+        Флаги is_assembly / is_shell не затрагиваются.
         """
         brep_string = None
         for obj in doc.Objects:
-            if hasattr(obj, 'Shape') and obj.Shape and not obj.Shape.isNull():
-                try:
-                    brep_string = obj.Shape.exportBrepToString()
-                    break
-                except Exception:
-                    continue
+            if not (hasattr(obj, 'Shape') and obj.Shape and not obj.Shape.isNull()):
+                continue
+            try:
+                brep_string = obj.Shape.exportBrepToString()
+                break
+            except Exception:
+                continue
 
         if not brep_string:
             return {"success": False, "error": "Не найдено ни одного тела с геометрией в активном документе"}
 
-        payload = {
-            "brep_files": {"brep_string": brep_string},
-            "is_assembly": False,
-            "is_shell": is_shell,
-        }
+        payload = {"brep_files": {"brep_string": brep_string}}
         response = api_client.send_patch_request(f"/api/basic_object/{module_id}", payload)
 
         log(f"PLMFunctions._save_single_body: ответ сервера: {response}")
@@ -318,6 +331,10 @@ class PLMFunctions:
             obj_id = getattr(obj, 'Id', None)
             if not obj_id:
                 log(f"PLMFunctions._save_assembly_coordinates: объект {obj.Label} не имеет Id, пропускаем")
+                continue
+
+            if obj_id == module_id:
+                log(f"PLMFunctions._save_assembly_coordinates: объект {obj.Label} совпадает с module_id, пропускаем")
                 continue
 
             try:
@@ -344,7 +361,7 @@ class PLMFunctions:
         if updated == 0:
             return {
                 "success": False,
-                "error": "Не найдено ни одного App::Part объекта с Id в активном документе",
+                "error": "Не найдено дочерних App::Part объектов (с Id, отличным от module_id) в активном документе. Save Position работает только для сборок.",
             }
 
         result = {"success": True, "message": f"Координаты {updated} дочерних объектов обновлены для модуля {module_id}"}
