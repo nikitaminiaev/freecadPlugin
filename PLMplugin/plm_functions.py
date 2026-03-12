@@ -46,6 +46,7 @@ class PLMFunctions:
         function_registry.register_function("go_to_supersystem", self.go_to_supersystem)
         function_registry.register_function("go_to_subsystem", self.go_to_subsystem)
         function_registry.register_function("upload_active_part", self.upload_active_part)
+        function_registry.register_function("save_active_doc", self.save_active_doc)
         
         log("PLMFunctions: Функции PLM успешно зарегистрированы")
     
@@ -223,4 +224,130 @@ class PLMFunctions:
         except Exception as e:
             error_msg = f"Error uploading the active part: {str(e)}\n{traceback.format_exc()}"
             log(error_msg)
-            return {"success": False, "error": str(e)} 
+            return {"success": False, "error": str(e)}
+
+    def save_active_doc(self, module_id: str, is_assembly: bool = False, is_shell: bool = False):
+        """
+        Сохраняет активный документ FreeCAD на сервер (вызывается из веб-интерфейса через WebSocket).
+
+        Режим is_assembly=False (одиночное тело):
+            Экспортирует BREP первого найденного тела и обновляет текущий модуль
+            через PATCH /api/basic_object/{module_id} с полем brep_files.
+
+        Режим is_assembly=True (сборка из нескольких тел):
+            Перебирает все объекты типа App::Part, у которых установлен Id.
+            Обновляет координаты дочерних объектов в parent_child_module через
+            PATCH /api/basic_object/{module_id} с полем added_children.
+
+        Args:
+            module_id (str): ID модуля в базе данных (из URL страницы деталей).
+            is_assembly (bool): True — режим сборки (только координаты).
+            is_shell (bool): True — тела внутри сборки являются shell-объектами.
+
+        Returns:
+            dict: Результат операции.
+        """
+        if not self.main_window:
+            return {"success": False, "error": "Главное окно не инициализировано"}
+
+        try:
+            import FreeCAD
+
+            doc = FreeCAD.ActiveDocument
+            if not doc:
+                return {"success": False, "error": "Нет активного документа FreeCAD"}
+
+            api_client = self.main_window.api_client
+
+            if not is_assembly:
+                return self._save_single_body(doc, module_id, is_shell, api_client)
+
+            return self._save_assembly_coordinates(doc, module_id, api_client)
+
+        except ImportError:
+            error_msg = "Модуль FreeCAD недоступен"
+            log(f"PLMFunctions.save_active_doc: {error_msg}")
+            return {"success": False, "error": error_msg}
+        except Exception as e:
+            error_msg = f"Ошибка в save_active_doc: {str(e)}\n{traceback.format_exc()}"
+            log(error_msg)
+            return {"success": False, "error": str(e)}
+
+    def _save_single_body(self, doc, module_id: str, is_shell: bool, api_client):
+        """
+        Находит первое тело с Shape в документе, экспортирует BREP и патчит модуль.
+        Сохраняет флаг is_shell и сбрасывает is_assembly (одиночная деталь — не сборка).
+        """
+        brep_string = None
+        for obj in doc.Objects:
+            if hasattr(obj, 'Shape') and obj.Shape and not obj.Shape.isNull():
+                try:
+                    brep_string = obj.Shape.exportBrepToString()
+                    break
+                except Exception:
+                    continue
+
+        if not brep_string:
+            return {"success": False, "error": "Не найдено ни одного тела с геометрией в активном документе"}
+
+        payload = {
+            "brep_files": {"brep_string": brep_string},
+            "is_assembly": False,
+            "is_shell": is_shell,
+        }
+        response = api_client.send_patch_request(f"/api/basic_object/{module_id}", payload)
+
+        log(f"PLMFunctions._save_single_body: ответ сервера: {response}")
+        return {"success": True, "message": f"BREP сохранён для модуля {module_id}"}
+
+    def _save_assembly_coordinates(self, doc, module_id: str, api_client):
+        """
+        Перебирает App::Part объекты, собирает их Id и Placement,
+        обновляет координаты каждого дочернего объекта через отдельный PATCH-запрос.
+
+        Использует PATCH /api/basic_object/{child_id} с полями parent_id + coordinates,
+        что триггерит UPDATE существующей записи в parent_child_module, а не INSERT.
+        """
+        updated = 0
+        errors = []
+
+        for obj in doc.Objects:
+            if obj.TypeId != 'App::Part':
+                continue
+
+            obj_id = getattr(obj, 'Id', None)
+            if not obj_id:
+                log(f"PLMFunctions._save_assembly_coordinates: объект {obj.Label} не имеет Id, пропускаем")
+                continue
+
+            try:
+                axis = obj.Placement.Rotation.Axis
+                coordinates = {
+                    "x": obj.Placement.Base.x,
+                    "y": obj.Placement.Base.y,
+                    "z": obj.Placement.Base.z,
+                    "angle": obj.Placement.Rotation.Angle,
+                    "axis": {"x": axis.x, "y": axis.y, "z": axis.z},
+                }
+            except Exception as e:
+                msg = f"Ошибка чтения Placement для {obj.Label}: {e}"
+                log(f"PLMFunctions._save_assembly_coordinates: {msg}")
+                errors.append(msg)
+                continue
+
+            # PATCH child — обновляет существующую запись в parent_child_module
+            payload = {"parent_id": module_id, "coordinates": coordinates}
+            response = api_client.send_patch_request(f"/api/basic_object/{obj_id}", payload)
+            log(f"PLMFunctions._save_assembly_coordinates: {obj.Label} ({obj_id}) → {response}")
+            updated += 1
+
+        if updated == 0:
+            return {
+                "success": False,
+                "error": "Не найдено ни одного App::Part объекта с Id в активном документе",
+            }
+
+        result = {"success": True, "message": f"Координаты {updated} дочерних объектов обновлены для модуля {module_id}"}
+        if errors:
+            result["warnings"] = errors
+        return result 

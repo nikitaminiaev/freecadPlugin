@@ -513,7 +513,7 @@ class PLMMainWindow(QtWidgets.QWidget):
 
         self.last_opened_obj_ids.append(obj_id)
 
-    def _load_object(self, obj_id, max_depth=10, is_recursive_call=False):
+    def _load_object(self, obj_id, max_depth=10, is_recursive_call=False, parent_coordinates=None):
         response = self.api_client.send_get_request(
             "/api/basic_object/{id}",
             path_params={"id": obj_id}
@@ -529,8 +529,9 @@ class PLMMainWindow(QtWidgets.QWidget):
         if obj.is_assembly and max_depth > 0 and obj.children:
             log(f"Loading assembly {obj.name} with {len(obj.children)} children")
             for child_id in obj.children:
-                # Рекурсивно вызываем загрузку для детей, помечая что это вызов из сборки
-                self._load_object(child_id, max_depth - 1, is_recursive_call=True)
+                # Берём координаты для этого child из ответа родителя (parent_child_module)
+                child_coords = obj.children_coordinates.get(child_id)
+                self._load_object(child_id, max_depth - 1, is_recursive_call=True, parent_coordinates=child_coords)
             return
 
         # Логика загрузки геометрии:
@@ -547,13 +548,18 @@ class PLMMainWindow(QtWidgets.QWidget):
         if should_load_geometry:
             coordinates = None
             if is_recursive_call:
-                coordinates = Coordinates(
-                    x=obj.coordinates["x"],
-                    y=obj.coordinates["y"],
-                    z=obj.coordinates["z"],
-                    angle=obj.coordinates["angle"],
-                    axis=obj.coordinates["axis"]
-                )
+                # Приоритет: координаты из parent_child_module (переданные родителем),
+                # затем fallback на поле coordinates самого объекта
+                coords_dict = parent_coordinates or obj.coordinates
+                if coords_dict:
+                    coordinates = Coordinates(
+                        x=coords_dict.get("x", 0.0),
+                        y=coords_dict.get("y", 0.0),
+                        z=coords_dict.get("z", 0.0),
+                        angle=coords_dict.get("angle", 0.0),
+                        axis=coords_dict.get("axis", {"x": 0.0, "y": 0.0, "z": 0.0})
+                    )
+                    log(f"Applying coordinates for {obj.name}: {coords_dict}")
 
             part_dto = PartCreationDTO(
                 brep_string=obj.brep_string,

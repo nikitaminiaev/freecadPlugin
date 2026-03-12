@@ -4,6 +4,8 @@ class BasicObject:
         self.name = data.get('name', 'N/A')
         self.children: list[str] = data.get('children', [])
         self.parents: list[str] = data.get('parents', [])
+        # Координаты дочерних объектов из parent_child_module (заполняются сервером для сборок)
+        self.children_coordinates: dict = data.get('children_coordinates', {})
 
         # Поля is_assembly и is_shell теперь находятся внутри bounding_contour
         bounding_contour = data.get('bounding_contour') or {}
