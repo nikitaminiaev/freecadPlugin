@@ -315,11 +315,10 @@ class PLMFunctions:
 
     def _save_assembly_coordinates(self, doc, module_id: str, api_client):
         """
-        Перебирает App::Part объекты, собирает их Id и Placement,
-        обновляет координаты каждого дочернего объекта через отдельный PATCH-запрос.
+        Перебирает App::Part объекты, собирает их ParentChildModuleId и Placement,
+        обновляет координаты конкретной записи в parent_child_module через PATCH-запрос.
 
-        Использует PATCH /api/basic_object/{child_id} с полями parent_id + coordinates,
-        что триггерит UPDATE существующей записи в parent_child_module, а не INSERT.
+        Использует PATCH /api/parent_child_module/{record_id} с полями coordinates.
         """
         updated = 0
         errors = []
@@ -328,13 +327,9 @@ class PLMFunctions:
             if obj.TypeId != 'App::Part':
                 continue
 
-            obj_id = getattr(obj, 'Id', None)
-            if not obj_id:
-                log(f"PLMFunctions._save_assembly_coordinates: объект {obj.Label} не имеет Id, пропускаем")
-                continue
-
-            if obj_id == module_id:
-                log(f"PLMFunctions._save_assembly_coordinates: объект {obj.Label} совпадает с module_id, пропускаем")
+            parent_child_module_id = getattr(obj, 'ParentChildModuleId', None)
+            if not parent_child_module_id:
+                log(f"PLMFunctions._save_assembly_coordinates: объект {obj.Label} не имеет ParentChildModuleId, пропускаем")
                 continue
 
             try:
@@ -352,16 +347,16 @@ class PLMFunctions:
                 errors.append(msg)
                 continue
 
-            # PATCH child — обновляет существующую запись в parent_child_module
-            payload = {"parent_id": module_id, "coordinates": coordinates}
-            response = api_client.send_patch_request(f"/api/basic_object/{obj_id}", payload)
-            log(f"PLMFunctions._save_assembly_coordinates: {obj.Label} ({obj_id}) → {response}")
+            # PATCH parent_child_module record — обновляет конкретную запись по её ID
+            payload = {"coordinates": coordinates}
+            response = api_client.send_patch_request(f"/api/parent_child_module/{parent_child_module_id}", payload)
+            log(f"PLMFunctions._save_assembly_coordinates: {obj.Label} (pcm_id={parent_child_module_id}) → {response}")
             updated += 1
 
         if updated == 0:
             return {
                 "success": False,
-                "error": "Не найдено дочерних App::Part объектов (с Id, отличным от module_id) в активном документе. Save Position работает только для сборок.",
+                "error": "Не найдено дочерних App::Part объектов с ParentChildModuleId в активном документе. Save Position работает только для сборок.",
             }
 
         result = {"success": True, "message": f"Координаты {updated} дочерних объектов обновлены для модуля {module_id}"}

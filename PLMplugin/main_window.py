@@ -513,7 +513,7 @@ class PLMMainWindow(QtWidgets.QWidget):
 
         self.last_opened_obj_ids.append(obj_id)
 
-    def _load_object(self, obj_id, max_depth=10, is_recursive_call=False, parent_coordinates=None):
+    def _load_object(self, obj_id, max_depth=10, is_recursive_call=False, parent_coordinates=None, parent_child_module_id=None):
         response = self.api_client.send_get_request(
             "/api/basic_object/{id}",
             path_params={"id": obj_id}
@@ -526,12 +526,14 @@ class PLMMainWindow(QtWidgets.QWidget):
             return
 
         # Если это сборка и мы можем идти глубже, загружаем детей
-        if obj.is_assembly and max_depth > 0 and obj.children:
-            log(f"Loading assembly {obj.name} with {len(obj.children)} children")
-            for child_id in obj.children:
-                # Берём координаты для этого child из ответа родителя (parent_child_module)
-                child_coords = obj.children_coordinates.get(child_id)
-                self._load_object(child_id, max_depth - 1, is_recursive_call=True, parent_coordinates=child_coords)
+        # Используем children_with_coordinates для загрузки всех записей (включая дубликаты)
+        if obj.is_assembly and max_depth > 0 and obj.children_with_coordinates:
+            log(f"Loading assembly {obj.name} with {len(obj.children_with_coordinates)} children (including duplicates)")
+            for child_entry in obj.children_with_coordinates:
+                child_id = child_entry["child_id"]
+                child_coords = child_entry.get("coordinates")
+                parent_child_module_id = child_entry.get("parent_child_module_id")
+                self._load_object(child_id, max_depth - 1, is_recursive_call=True, parent_coordinates=child_coords, parent_child_module_id=parent_child_module_id)
             return
 
         # Логика загрузки геометрии:
@@ -565,7 +567,8 @@ class PLMMainWindow(QtWidgets.QWidget):
                 brep_string=obj.brep_string,
                 id=obj.id,
                 label=obj.name,
-                coordinates=coordinates
+                coordinates=coordinates,
+                parent_child_module_id=parent_child_module_id
             )
 
             CADUtils.create_part_with_brep(part_dto)

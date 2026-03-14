@@ -23,6 +23,7 @@ class PartCreationDTO:
         id: Optional unique identifier for the part
         label: Optional display label for the part in FreeCAD interface
         coordinates: Optional positioning and rotation data
+        parent_child_module_id: Optional ID of the parent_child_module record
 
     Example:
         coords = Coordinates(
@@ -34,13 +35,15 @@ class PartCreationDTO:
             brep_string="... BREP data ...",
             id="unique_id_123",
             label="My Part",
-            coordinates=coords
+            coordinates=coords,
+            parent_child_module_id="uuid-record-id"
         )
     """
     brep_string: Optional[str]
     id: Optional[str] = None
     label: Optional[str] = "NewPart"
     coordinates: Optional[Coordinates] = None
+    parent_child_module_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Union[str, Dict, List]]:
         """Convert DTO to dictionary format for legacy support"""
@@ -177,6 +180,10 @@ class CADUtils:
         try:
             if data.id is not None:
                 obj.Id = data.id
+
+            if data.parent_child_module_id is not None:
+                obj.addProperty("App::PropertyString", "ParentChildModuleId")
+                obj.ParentChildModuleId = data.parent_child_module_id
 
             if data.coordinates is not None:
                 obj.Placement.Base.x = data.coordinates.x
