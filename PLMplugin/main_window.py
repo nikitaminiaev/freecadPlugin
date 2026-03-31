@@ -487,8 +487,17 @@ class PLMMainWindow(QtWidgets.QWidget):
 
     def load_object_in_new_doc(self, obj_id):
         try:
+            response = self.api_client.send_get_request(
+                "/api/basic_object/{id}",
+                path_params={"id": obj_id}
+            )
+            data = json.loads(response)
+            obj = BasicObject.from_response(data)
+
+            doc_name = obj.name if obj and obj.name and obj.name != 'N/A' else f"Document_{obj_id}"
+
             CADUtils.close_active_doc()
-            active_doc = CADUtils.create_new_doc(f"Document_{obj_id}")
+            active_doc = CADUtils.create_new_doc(doc_name)
 
             self._load_object(obj_id, is_recursive_call=False)
             CADUtils.recompute_doc()
