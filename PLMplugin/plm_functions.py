@@ -53,12 +53,13 @@ class PLMFunctions:
     
     # Обертки для методов PLMMainWindow
     
-    def load_object_in_new_doc(self, obj_id):
+    def load_object_in_new_doc(self, obj_id, depth=1):
         """
         Загружает объект в новый документ FreeCAD
         
         Args:
             obj_id (str): ID объекта для загрузки
+            depth (int): Глубина загрузки иерархии модулей (по умолчанию 1)
         
         Returns:
             dict: Результат операции
@@ -67,11 +68,11 @@ class PLMFunctions:
             return {"success": False, "error": "Главное окно не инициализировано"}
         
         try:
-            log(f"PLMFunctions: Вызов load_object_in_new_doc с ID: {obj_id}")
-            self.main_window.load_object_in_new_doc(obj_id)
+            log(f"PLMFunctions: Вызов load_object_in_new_doc с ID: {obj_id}, depth: {depth}")
+            self.main_window.load_object_in_new_doc(obj_id, depth=depth)
             return {
                 "success": True,
-                "message": f"object {obj_id} successfully loaded in a new document"
+                "message": f"object {obj_id} successfully loaded in a new document (depth={depth})"
             }
         except Exception as e:
             error_msg = f"Error loading object in a new document: {str(e)}\n{traceback.format_exc()}"

@@ -212,6 +212,9 @@ class PLMMainWindow(QtWidgets.QWidget):
             if child_ids:
                 active_doc.Comment = json.dumps(child_ids)
 
+            if is_assembly and parent_id:
+                self.plm_functions.save_position(parent_id)
+
         except ImportError:
             QtWidgets.QMessageBox.critical(self, 'Error', 'FreeCAD module not available!')
         except Exception as e:
@@ -485,7 +488,7 @@ class PLMMainWindow(QtWidgets.QWidget):
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
 
-    def load_object_in_new_doc(self, obj_id):
+    def load_object_in_new_doc(self, obj_id, depth=1):
         try:
             response = self.api_client.send_get_request(
                 "/api/basic_object/{id}",
@@ -499,7 +502,7 @@ class PLMMainWindow(QtWidgets.QWidget):
             CADUtils.close_active_doc()
             active_doc = CADUtils.create_new_doc(doc_name)
 
-            self._load_object(obj_id, is_recursive_call=False)
+            self._load_object(obj_id, depth=depth, is_recursive_call=False)
             CADUtils.recompute_doc()
             CADUtils.set_id(active_doc, obj_id)
         except Exception as e:
@@ -522,39 +525,42 @@ class PLMMainWindow(QtWidgets.QWidget):
 
         self.last_opened_obj_ids.append(obj_id)
 
-    def _load_object(self, obj_id, max_depth=10, is_recursive_call=False, parent_coordinates=None, parent_child_module_id=None):
+    def _load_object(self, obj_id, depth=1, is_recursive_call=False, parent_coordinates=None, parent_child_module_id=None):
         response = self.api_client.send_get_request(
             "/api/basic_object/{id}",
             path_params={"id": obj_id}
         )
         data = json.loads(response)
         obj = BasicObject.from_response(data)
-        
+
         if not obj:
             log(f"Failed to load object with ID: {obj_id}")
             return
 
         # Если это сборка и мы можем идти глубже, загружаем детей
         # Используем children_with_coordinates для загрузки всех записей (включая дубликаты)
-        if obj.is_assembly and max_depth > 0 and obj.children_with_coordinates:
-            log(f"Loading assembly {obj.name} with {len(obj.children_with_coordinates)} children (including duplicates)")
+        if obj.is_assembly and depth > 0 and obj.children_with_coordinates:
+            log(f"Loading assembly {obj.name} with {len(obj.children_with_coordinates)} children (depth={depth})")
             for child_entry in obj.children_with_coordinates:
                 child_id = child_entry["child_id"]
                 child_coords = child_entry.get("coordinates")
-                parent_child_module_id = child_entry.get("parent_child_module_id")
-                self._load_object(child_id, max_depth - 1, is_recursive_call=True, parent_coordinates=child_coords, parent_child_module_id=parent_child_module_id)
-            return
+                child_pcm_id = child_entry.get("parent_child_module_id")
+                self._load_object(child_id, depth - 1, is_recursive_call=True, parent_coordinates=child_coords, parent_child_module_id=child_pcm_id)
 
         # Логика загрузки геометрии:
         # 1. Если это прямой вызов (не из сборки), грузим всегда, если есть BREP
         # 2. Если это вызов из сборки, грузим только если is_shell=True
+        # 3. Если это сборка с прямым вызовом, грузим только если is_shell=True
         should_load_geometry = False
-        if not is_recursive_call and obj.brep_string:
+        if not is_recursive_call and not obj.is_assembly and obj.brep_string:
             should_load_geometry = True
             log(f"Direct load: creating part for {obj.name}")
-        elif is_recursive_call and obj.is_shell:
+        elif not is_recursive_call and obj.is_assembly and obj.is_shell and obj.brep_string:
             should_load_geometry = True
-            log(f"Assembly load: creating shell part for {obj.name}")
+            log(f"Assembly direct load: creating shell part for {obj.name}")
+        elif is_recursive_call and obj.is_shell and obj.brep_string:
+            should_load_geometry = True
+            log(f"Assembly child load: creating shell part for {obj.name}")
 
         if should_load_geometry:
             coordinates = None
@@ -582,7 +588,7 @@ class PLMMainWindow(QtWidgets.QWidget):
 
             CADUtils.create_part_with_brep(part_dto)
         else:
-            reason = "is_shell is False in assembly" if is_recursive_call else "no BREP data"
+            reason = "is_shell is False or no BREP" if obj.is_assembly else "no BREP data"
             log(f"Skipping object {obj.name} (ID: {obj_id}) - {reason}")
 
     def toggle_mcp_server(self):
