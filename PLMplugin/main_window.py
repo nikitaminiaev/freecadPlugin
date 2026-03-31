@@ -488,7 +488,7 @@ class PLMMainWindow(QtWidgets.QWidget):
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
 
-    def load_object_in_new_doc(self, obj_id, depth=1):
+    def load_object_in_new_doc(self, obj_id, child_depths=None):
         try:
             response = self.api_client.send_get_request(
                 "/api/basic_object/{id}",
@@ -502,7 +502,14 @@ class PLMMainWindow(QtWidgets.QWidget):
             CADUtils.close_active_doc()
             active_doc = CADUtils.create_new_doc(doc_name)
 
-            self._load_object(obj_id, depth=depth, is_recursive_call=False)
+            # Создаем словарь для быстрого поиска depth по child_id и parent_child_module_id
+            child_depths_dict = {}
+            if child_depths:
+                for cd in child_depths:
+                    key = (cd.get('child_id'), cd.get('parent_child_module_id'))
+                    child_depths_dict[key] = cd.get('depth', 1)
+            
+            self._load_object(obj_id, depth=1, child_depths_dict=child_depths_dict, is_recursive_call=False)
             CADUtils.recompute_doc()
             CADUtils.set_id(active_doc, obj_id)
         except Exception as e:
@@ -518,14 +525,14 @@ class PLMMainWindow(QtWidgets.QWidget):
                 QtWidgets.QMessageBox.critical(self, 'Error', 'no active doc!')
                 return
 
-            self._load_object(obj_id, is_recursive_call=False)
+            self._load_object(obj_id, depth=1, child_depths_dict=None, is_recursive_call=False)
             CADUtils.recompute_doc()
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred while loading the object: {str(e)}')
 
         self.last_opened_obj_ids.append(obj_id)
 
-    def _load_object(self, obj_id, depth=1, is_recursive_call=False, parent_coordinates=None, parent_child_module_id=None):
+    def _load_object(self, obj_id, depth=1, is_recursive_call=False, parent_coordinates=None, parent_child_module_id=None, child_depths_dict=None):
         response = self.api_client.send_get_request(
             "/api/basic_object/{id}",
             path_params={"id": obj_id}
@@ -545,7 +552,15 @@ class PLMMainWindow(QtWidgets.QWidget):
                 child_id = child_entry["child_id"]
                 child_coords = child_entry.get("coordinates")
                 child_pcm_id = child_entry.get("parent_child_module_id")
-                self._load_object(child_id, depth - 1, is_recursive_call=True, parent_coordinates=child_coords, parent_child_module_id=child_pcm_id)
+                
+                # Определяем глубину для этого ребенка
+                child_depth = depth
+                if child_depths_dict:
+                    key = (child_id, child_pcm_id)
+                    if key in child_depths_dict:
+                        child_depth = child_depths_dict[key]
+                
+                self._load_object(child_id, depth=child_depth, is_recursive_call=True, parent_coordinates=child_coords, parent_child_module_id=child_pcm_id, child_depths_dict=child_depths_dict)
 
         # Логика загрузки геометрии:
         # 1. Если это прямой вызов (не из сборки), грузим всегда, если есть BREP
