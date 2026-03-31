@@ -509,7 +509,7 @@ class PLMMainWindow(QtWidgets.QWidget):
                     key = (cd.get('child_id'), cd.get('parent_child_module_id'))
                     child_depths_dict[key] = cd.get('depth', 1)
             
-            self._load_object(obj_id, depth=1, child_depths_dict=child_depths_dict, is_recursive_call=False)
+            self._load_object(obj_id, depth=0, child_depths_dict=child_depths_dict, is_recursive_call=False)
             CADUtils.recompute_doc()
             CADUtils.set_id(active_doc, obj_id)
         except Exception as e:
@@ -525,7 +525,7 @@ class PLMMainWindow(QtWidgets.QWidget):
                 QtWidgets.QMessageBox.critical(self, 'Error', 'no active doc!')
                 return
 
-            self._load_object(obj_id, depth=1, child_depths_dict=None, is_recursive_call=False)
+            self._load_object(obj_id, depth=0, child_depths_dict=None, is_recursive_call=False)
             CADUtils.recompute_doc()
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred while loading the object: {str(e)}')
@@ -546,8 +546,8 @@ class PLMMainWindow(QtWidgets.QWidget):
 
         # Если это сборка и мы можем идти глубже, загружаем детей
         # Используем children_with_coordinates для загрузки всех записей (включая дубликаты)
-        if obj.is_assembly and depth > 0 and obj.children_with_coordinates:
-            log(f"Loading assembly {obj.name} with {len(obj.children_with_coordinates)} children (depth={depth})")
+        if obj.is_assembly and obj.children_with_coordinates:
+            log(f"Loading assembly {obj.name} with {len(obj.children_with_coordinates)} children")
             for child_entry in obj.children_with_coordinates:
                 child_id = child_entry["child_id"]
                 child_coords = child_entry.get("coordinates")
@@ -560,7 +560,11 @@ class PLMMainWindow(QtWidgets.QWidget):
                     if key in child_depths_dict:
                         child_depth = child_depths_dict[key]
                 
-                self._load_object(child_id, depth=child_depth, is_recursive_call=True, parent_coordinates=child_coords, parent_child_module_id=child_pcm_id, child_depths_dict=child_depths_dict)
+                # Загружаем только если глубина > 0
+                if child_depth > 0:
+                    self._load_object(child_id, depth=child_depth - 1, is_recursive_call=True, parent_coordinates=child_coords, parent_child_module_id=child_pcm_id, child_depths_dict=child_depths_dict)
+                else:
+                    log(f"Skipping child {child_id} (depth=0)")
 
         # Логика загрузки геометрии:
         # 1. Если это прямой вызов (не из сборки), грузим всегда, если есть BREP
