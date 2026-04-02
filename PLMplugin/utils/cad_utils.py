@@ -259,6 +259,23 @@ class CADUtils:
         log(f"Placement сброшен для объекта: {obj.Label}")
 
     @staticmethod
+    def restore_placement(obj, coordinates: Coordinates):
+        """Восстанавливает Placement объекта из сохранённых координат.
+
+        Args:
+            obj: FreeCAD объект
+            coordinates: Координаты для восстановления
+        """
+        obj.Placement.Base.x = coordinates.x
+        obj.Placement.Base.y = coordinates.y
+        obj.Placement.Base.z = coordinates.z
+        obj.Placement.Rotation.Angle = coordinates.angle
+        obj.Placement.Rotation.Axis.x = coordinates.axis['x']
+        obj.Placement.Rotation.Axis.y = coordinates.axis['y']
+        obj.Placement.Rotation.Axis.z = coordinates.axis['z']
+        log(f"Placement восстановлен для объекта: {obj.Label}")
+
+    @staticmethod
     def get_all_selected_obj():
         try:
             import FreeCADGui as Gui

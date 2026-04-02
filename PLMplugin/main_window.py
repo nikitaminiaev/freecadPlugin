@@ -181,9 +181,11 @@ class PLMMainWindow(QtWidgets.QWidget):
                 if parent_id:
                     CADUtils.set_id(active_doc, parent_id)
             child_ids = {}
+            placements_to_restore = {}
             for selected_obj in selected_objs:
                 # Сохраняем координаты и сбрасываем Placement (для не-сборок)
                 saved_coordinates = self._extract_and_reset_placement(selected_obj)
+                placements_to_restore[selected_obj] = saved_coordinates
 
                 part_dto = CADUtils.create_dto_from_object(selected_obj)
                 # Заменяем координаты в DTO на сохранённые (до сброса)
@@ -218,6 +220,10 @@ class PLMMainWindow(QtWidgets.QWidget):
 
             if is_assembly and parent_id:
                 self.plm_functions.save_position(parent_id)
+
+            # Восстанавливаем Placement после сохранения, чтобы объекты остались на месте визуально
+            for obj, coords in placements_to_restore.items():
+                CADUtils.restore_placement(obj, coords)
 
         except ImportError:
             QtWidgets.QMessageBox.critical(self, 'Error', 'FreeCAD module not available!')
