@@ -241,6 +241,22 @@ class CADUtils:
         except Exception:
             pass
 
+    @staticmethod
+    def reset_placement(obj):
+        """Сбрасывает Placement объекта к дефолтному.
+
+        Для App::Part Placement не сбрасывается, чтобы save_position() работал корректно.
+
+        Args:
+            obj: FreeCAD объект
+        """
+        import FreeCAD as App
+
+        if obj.TypeId == 'App::Part':
+            return
+
+        obj.Placement = App.Placement()
+        log(f"Placement сброшен для объекта: {obj.Label}")
 
     @staticmethod
     def get_all_selected_obj():

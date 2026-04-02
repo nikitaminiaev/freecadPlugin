@@ -180,10 +180,14 @@ class PLMMainWindow(QtWidgets.QWidget):
                 parent_id = self._upload_single_object(parent_dto, author, None, is_assembly=True, is_shell=False)
                 if parent_id:
                     CADUtils.set_id(active_doc, parent_id)
-            
             child_ids = {}
             for selected_obj in selected_objs:
+                # Сохраняем координаты и сбрасываем Placement (для не-сборок)
+                saved_coordinates = self._extract_and_reset_placement(selected_obj)
+
                 part_dto = CADUtils.create_dto_from_object(selected_obj)
+                # Заменяем координаты в DTO на сохранённые (до сброса)
+                part_dto.coordinates = saved_coordinates
                 if comment and part_dto.label in comment:
                     part_dto.id = comment[part_dto.label]
                 
@@ -295,8 +299,31 @@ class PLMMainWindow(QtWidgets.QWidget):
                 return data['id']
             return None
         except Exception as e:
-            QtWidgets.QMessageBox.critical(self, 'Error', f'Error uploading object: {str(e)}')
+            QtWidgets.QMessageBox.warning(self, 'Error', f'Error uploading object: {str(e)}')
             return None
+
+    def _extract_and_reset_placement(self, obj) -> Coordinates:
+        """Извлекает координаты из Placement объекта и сбрасывает его.
+
+        Args:
+            obj: FreeCAD объект
+
+        Returns:
+            Coordinates: Сохранённые координаты до сброса
+        """
+        saved_coordinates = Coordinates(
+            x=obj.Placement.Base.x,
+            y=obj.Placement.Base.y,
+            z=obj.Placement.Base.z,
+            angle=obj.Placement.Rotation.Angle,
+            axis={
+                'x': obj.Placement.Rotation.Axis.x,
+                'y': obj.Placement.Rotation.Axis.y,
+                'z': obj.Placement.Rotation.Axis.z
+            }
+        )
+        CADUtils.reset_placement(obj)
+        return saved_coordinates
 
     def search_part(self):
         part_name = self.textInput.text()
