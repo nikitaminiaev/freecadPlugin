@@ -1,3 +1,4 @@
+import json
 import traceback
 from function_registry import FunctionRegistry
 from utils.logger import log
@@ -318,10 +319,26 @@ class PLMFunctions:
     def _save_assembly_coordinates(self, doc, module_id: str, api_client):
         """
         Перебирает App::Part объекты, собирает их ParentChildModuleId и Placement,
-        обновляет координаты конкретной записи в parent_child_module через PATCH-запрос.
+        обновляет координаты только прямых детей текущей сборки через PATCH-запрос.
 
         Использует PATCH /api/parent_child_module/{record_id} с полями coordinates.
         """
+        direct_children_pcm_ids = self._get_direct_children_pcm_ids(module_id, api_client)
+        if direct_children_pcm_ids is None:
+            return {
+                "success": False,
+                "error": (
+                    "Не удалось получить связи прямых детей для Save Position. "
+                    "Координаты не сохранены, чтобы избежать обновления вложенных уровней."
+                ),
+            }
+
+        if not direct_children_pcm_ids:
+            return {
+                "success": False,
+                "error": "У сборки нет прямых детей для Save Position.",
+            }
+
         updated = 0
         errors = []
 
@@ -332,6 +349,14 @@ class PLMFunctions:
             parent_child_module_id = getattr(obj, 'ParentChildModuleId', None)
             if not parent_child_module_id:
                 log(f"PLMFunctions._save_assembly_coordinates: объект {obj.Label} не имеет ParentChildModuleId, пропускаем")
+                continue
+
+            if parent_child_module_id not in direct_children_pcm_ids:
+                log(
+                    f"PLMFunctions._save_assembly_coordinates: объект {obj.Label} "
+                    f"(pcm_id={parent_child_module_id}) не является прямым ребенком "
+                    f"сборки {module_id}, пропускаем"
+                )
                 continue
 
             try:
@@ -365,3 +390,38 @@ class PLMFunctions:
         if errors:
             result["warnings"] = errors
         return result 
+
+    def _get_direct_children_pcm_ids(self, module_id: str, api_client):
+        """
+        Возвращает множество parent_child_module_id только прямых детей сборки module_id.
+        """
+        response = api_client.send_get_request(
+            "/api/basic_object/{id}",
+            path_params={"id": module_id},
+        )
+
+        try:
+            payload = json.loads(response)
+        except Exception as e:
+            log(f"PLMFunctions._get_direct_children_pcm_ids: некорректный JSON ответа: {e}")
+            return None
+
+        if not isinstance(payload, dict):
+            log("PLMFunctions._get_direct_children_pcm_ids: ответ не является объектом")
+            return None
+
+        if payload.get("error"):
+            log(f"PLMFunctions._get_direct_children_pcm_ids: ошибка API: {payload.get('error')}")
+            return None
+
+        children_with_coordinates = payload.get("children_with_coordinates")
+        if children_with_coordinates is None:
+            log("PLMFunctions._get_direct_children_pcm_ids: в ответе нет children_with_coordinates")
+            return None
+
+        pcm_ids = {
+            entry.get("parent_child_module_id")
+            for entry in children_with_coordinates
+            if entry.get("parent_child_module_id")
+        }
+        return pcm_ids
