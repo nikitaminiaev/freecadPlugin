@@ -521,20 +521,24 @@ class PLMMainWindow(QtWidgets.QWidget):
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
 
-    def load_object_in_new_doc(self, obj_id, child_depths=None):
+    def load_object_in_new_doc(self, obj_id, child_depths=None, absolute_coordinates=None):
         try:
+            log(f"DEBUG load_object_in_new_doc: obj_id={obj_id}")
+            log(f"DEBUG load_object_in_new_doc: child_depths={child_depths}")
+            log(f"DEBUG load_object_in_new_doc: absolute_coordinates count={len(absolute_coordinates) if absolute_coordinates else 0}")
+            
             response = self.api_client.send_get_request(
                 "/api/basic_object/{id}",
                 path_params={"id": obj_id}
             )
             data = json.loads(response)
             obj = BasicObject.from_response(data)
-
+            
             doc_name = obj.name if obj and obj.name and obj.name != 'N/A' else f"Document_{obj_id}"
-
+            
             CADUtils.close_active_doc()
             active_doc = CADUtils.create_new_doc(doc_name)
-
+            
             # Создаем словарь для быстрого поиска depth по child_id и parent_child_module_id
             child_depths_dict = {}
             if child_depths:
@@ -542,13 +546,54 @@ class PLMMainWindow(QtWidgets.QWidget):
                     key = (cd.get('child_id'), cd.get('parent_child_module_id'))
                     child_depths_dict[key] = cd.get('depth', 1)
             
-            self._load_object(obj_id, depth=0, child_depths_dict=child_depths_dict, is_recursive_call=False)
+            log(f"DEBUG load_object_in_new_doc: child_depths_dict={child_depths_dict}")
+            
+            # Создаем словарь absolute_coordinates для быстрого поиска
+            absolute_coordinates_dict = self._build_absolute_coordinates_dict(absolute_coordinates or [])
+            
+            self._load_object(obj_id, depth=1, child_depths_dict=child_depths_dict, absolute_coordinates_dict=absolute_coordinates_dict, is_recursive_call=False)
             CADUtils.recompute_doc()
             CADUtils.set_id(active_doc, obj_id)
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred while loading the object: {str(e)}')
 
         self.last_opened_obj_ids.append(obj_id)
+    
+    def _build_absolute_coordinates_dict(self, absolute_coordinates: list) -> dict:
+        """
+        Создает словарь для быстрого поиска абсолютных координат.
+        
+        Структура:
+        result[child_id][parent_instance_pcm_key][child_pcm_key] = coordinates
+        
+        Пример:
+        result = {
+            '6776e684': {
+                'a5153e34': {'4c0a6125': {x:0, z:56}},
+                '0273bdc8': {'4c0a6125': {x:41, z:26}}
+            },
+        }
+        """
+        result = {}
+        for entry in absolute_coordinates:
+            obj_id = entry.get("object_id")
+            pcm_id = entry.get("parent_child_module_id")
+            parent_instance_pcm_id = entry.get("parent_instance_pcm_id")
+            
+            if not obj_id:
+                continue
+            
+            if obj_id not in result:
+                result[obj_id] = {}
+            
+            parent_instance_key = parent_instance_pcm_id if parent_instance_pcm_id else "root"
+            if parent_instance_key not in result[obj_id]:
+                result[obj_id][parent_instance_key] = {}
+
+            child_pcm_key = pcm_id if pcm_id else "default"
+            result[obj_id][parent_instance_key][child_pcm_key] = entry.get("absolute_coordinates")
+        
+        return result
 
     def load_object_in_same_doc(self, obj_id):
         try:
@@ -565,7 +610,7 @@ class PLMMainWindow(QtWidgets.QWidget):
 
         self.last_opened_obj_ids.append(obj_id)
 
-    def _load_object(self, obj_id, depth=1, is_recursive_call=False, parent_coordinates=None, parent_child_module_id=None, child_depths_dict=None):
+    def _load_object(self, obj_id, depth=1, is_recursive_call=False, parent_coordinates=None, parent_child_module_id=None, child_depths_dict=None, absolute_coordinates_dict=None):
         response = self.api_client.send_get_request(
             "/api/basic_object/{id}",
             path_params={"id": obj_id}
@@ -577,50 +622,20 @@ class PLMMainWindow(QtWidgets.QWidget):
             log(f"Failed to load object with ID: {obj_id}")
             return
 
-        # Если это сборка и мы можем идти глубже, загружаем детей
-        # Используем children_with_coordinates для загрузки всех записей (включая дубликаты)
-        if obj.is_assembly and obj.children_with_coordinates:
-            log(f"Loading assembly {obj.name} with {len(obj.children_with_coordinates)} children")
-            for child_entry in obj.children_with_coordinates:
-                child_id = child_entry["child_id"]
-                child_coords = child_entry.get("coordinates")
-                child_pcm_id = child_entry.get("parent_child_module_id")
-                
-                # Определяем глубину для этого ребенка
-                child_depth = depth
-                if child_depths_dict:
-                    key = (child_id, child_pcm_id)
-                    if key in child_depths_dict:
-                        child_depth = child_depths_dict[key]
-                
-                # Загружаем только если глубина > 0
-                if child_depth > 0:
-                    self._load_object(child_id, depth=child_depth - 1, is_recursive_call=True, parent_coordinates=child_coords, parent_child_module_id=child_pcm_id, child_depths_dict=child_depths_dict)
-                else:
-                    log(f"Skipping child {child_id} (depth=0)")
-
-        # Логика загрузки геометрии:
-        # 1. Если это прямой вызов (не из сборки), грузим всегда, если есть BREP
-        # 2. Если это вызов из сборки, грузим только если is_shell=True
-        # 3. Если это сборка с прямым вызовом, грузим только если is_shell=True
-        should_load_geometry = False
-        if not is_recursive_call and not obj.is_assembly and obj.brep_string:
-            should_load_geometry = True
-            log(f"Direct load: creating part for {obj.name}")
-        elif not is_recursive_call and obj.is_assembly and obj.is_shell and obj.brep_string:
-            should_load_geometry = True
-            log(f"Assembly direct load: creating shell part for {obj.name}")
-        elif is_recursive_call and obj.is_shell and obj.brep_string:
-            should_load_geometry = True
-            log(f"Assembly child load: creating shell part for {obj.name}")
+        # Сначала загружаем геометрию самого объекта (если есть BREP)
+        should_load_geometry = bool(obj.brep_string)
+        if should_load_geometry:
+            if obj.is_assembly:
+                load_context = "recursive" if is_recursive_call else "direct"
+                log(f"Assembly {load_context} load: creating part for {obj.name}")
+            else:
+                log(f"Part load: creating part for {obj.name}")
 
         if should_load_geometry:
             coordinates = None
             if is_recursive_call:
-                # Приоритет: координаты из parent_child_module (переданные родителем),
-                # затем fallback на поле coordinates самого объекта
-                coords_dict = parent_coordinates or obj.coordinates
-                if coords_dict:
+                if parent_coordinates:
+                    coords_dict = parent_coordinates
                     coordinates = Coordinates(
                         x=coords_dict.get("x", 0.0),
                         y=coords_dict.get("y", 0.0),
@@ -629,6 +644,11 @@ class PLMMainWindow(QtWidgets.QWidget):
                         axis=coords_dict.get("axis", {"x": 0.0, "y": 0.0, "z": 0.0})
                     )
                     log(f"Applying coordinates for {obj.name}: {coords_dict}")
+                else:
+                    log(
+                        f"Абсолютные координаты для рекурсивной загрузки не найдены "
+                        f"({obj.name}, id={obj.id}), объект будет загружен без placement (по умолчанию)"
+                    )
 
             part_dto = PartCreationDTO(
                 brep_string=obj.brep_string,
@@ -640,8 +660,40 @@ class PLMMainWindow(QtWidgets.QWidget):
 
             CADUtils.create_part_with_brep(part_dto)
         else:
-            reason = "is_shell is False or no BREP" if obj.is_assembly else "no BREP data"
-            log(f"Skipping object {obj.name} (ID: {obj_id}) - {reason}")
+            log(f"Skipping object {obj.name} (ID: {obj_id}) - no BREP data")
+
+        # Потом загружаем детей (если это сборка)
+        if obj.is_assembly and obj.children_with_coordinates:
+            log(f"Loading assembly {obj.name} with {len(obj.children_with_coordinates)} children")
+            for child_entry in obj.children_with_coordinates:
+                child_id = child_entry["child_id"]
+                child_pcm_id = child_entry.get("parent_child_module_id")
+                
+                child_depth = depth
+                if child_depths_dict:
+                    key = (child_id, child_pcm_id)
+                    if key in child_depths_dict:
+                        child_depth = child_depths_dict[key]
+                
+                if child_depth > 0:
+                    child_absolute_coords = None
+                    parent_instance_key = parent_child_module_id if parent_child_module_id else "root"
+                    child_pcm_key = child_pcm_id if child_pcm_id else "default"
+                    log(f"DEBUG: Looking for child_id={child_id}, parent_instance_key={parent_instance_key}, child_pcm_key={child_pcm_key}")
+                    if absolute_coordinates_dict and child_id in absolute_coordinates_dict:
+                        child_by_parent = absolute_coordinates_dict[child_id].get(parent_instance_key, {})
+                        if child_pcm_key in child_by_parent:
+                            child_absolute_coords = child_by_parent[child_pcm_key]
+                            log(f"DEBUG: Found coords: {child_absolute_coords}")
+                        else:
+                            log(
+                                f"DEBUG: Not found child_pcm_key={child_pcm_key}, "
+                                f"available keys={list(child_by_parent.keys())}"
+                            )
+                    
+                    self._load_object(child_id, depth=child_depth - 1, is_recursive_call=True, parent_coordinates=child_absolute_coords, parent_child_module_id=child_pcm_id, child_depths_dict=child_depths_dict, absolute_coordinates_dict=absolute_coordinates_dict)
+                else:
+                    log(f"Skipping child {child_id} (depth=0)")
 
     def toggle_mcp_server(self):
         """Включает или выключает MCP сервер"""

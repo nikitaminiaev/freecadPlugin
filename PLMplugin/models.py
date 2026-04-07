@@ -9,6 +9,8 @@ class BasicObject:
         # Полный список записей children с координатами (включая дубликаты)
         # Каждая запись: {"parent_child_module_id": "...", "child_id": "...", "coordinates": {...}}
         self.children_with_coordinates: list[dict] = data.get('children_with_coordinates', [])
+        # Абсолютные координаты для иерархической загрузки (вычисляются сервером)
+        self.absolute_coordinates: list[dict] = data.get('absolute_coordinates', [])
 
         # Поля is_assembly и is_shell теперь находятся внутри bounding_contour
         bounding_contour = data.get('bounding_contour') or {}
