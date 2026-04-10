@@ -633,19 +633,35 @@ class PLMMainWindow(QtWidgets.QWidget):
         except Exception as e:
             log(f"Failed to attach {getattr(child_obj, 'Label', 'unknown')} to parent group: {str(e)}")
 
-    def _create_link_instance(self, source_obj, label, parent_child_module_id=None, coordinates=None):
-        """Создает экземпляр-ссылку App::Link на source_obj."""
+    def _remove_from_parent_group(self, parent_obj, child_obj):
+        """Удаляет child_obj из parent_obj.Group."""
+        if not parent_obj or not child_obj:
+            return
+        try:
+            if not hasattr(parent_obj, "Group"):
+                return
+            current_group = list(parent_obj.Group)
+            if child_obj not in current_group:
+                return
+            current_group.remove(child_obj)
+            parent_obj.Group = current_group
+        except Exception as e:
+            log(
+                f"Failed to remove {getattr(child_obj, 'Label', 'unknown')} "
+                f"from parent group: {str(e)}"
+            )
+
+    def _create_document_group(self, label, parent_container=None):
         try:
             import FreeCAD as App
             doc = App.ActiveDocument
-            link_obj = doc.addObject("App::Link", f"Link_{label}")
-            link_obj.setLink(source_obj)
-            link_obj.Label = label
-            self._set_parent_child_module_id(link_obj, parent_child_module_id)
-            self._apply_placement_from_coordinates(link_obj, coordinates)
-            return link_obj
+            group_obj = doc.addObject("App::DocumentObjectGroup", "Group")
+            group_obj.Label = label
+            if parent_container:
+                self._attach_to_parent_group(parent_container, group_obj)
+            return group_obj
         except Exception as e:
-            log(f"Failed to create link instance for {label}: {str(e)}")
+            log(f"Failed to create document group for {label}: {str(e)}")
             return None
 
     def load_object_in_same_doc(self, obj_id):
@@ -745,35 +761,42 @@ class PLMMainWindow(QtWidgets.QWidget):
         # Потом загружаем детей (если это сборка)
         if obj.is_assembly and obj.children_with_coordinates:
             log(f"Loading assembly {obj.name} with {len(obj.children_with_coordinates)} children")
-            created_children_by_key = {}
+            child_id_counts = {}
+            for child_entry in obj.children_with_coordinates:
+                cid = child_entry["child_id"]
+                child_id_counts[cid] = child_id_counts.get(cid, 0) + 1
+            first_loaded_child_by_id = {}
+            duplicate_group_by_id = {}
             for child_entry in obj.children_with_coordinates:
                 child_id = child_entry["child_id"]
                 child_pcm_id = child_entry.get("parent_child_module_id")
-                
+
                 child_depth = depth
                 if child_depths_dict:
                     key = (child_id, child_pcm_id)
                     if key in child_depths_dict:
                         child_depth = child_depths_dict[key]
-                
+
                 if child_depth > 0:
-                    # Для вложенной структуры в Group используем локальные координаты
-                    # связи parent->child (из children_with_coordinates).
                     child_relative_coords = child_entry.get("coordinates") or None
-
-                    # На одном уровне повторные child_id создаем через App::Link на первый объект.
-                    cache_key = (child_id, child_depth)
-                    if cache_key in created_children_by_key:
-                        source_obj = created_children_by_key[cache_key]
-                        link_obj = self._create_link_instance(
-                            source_obj=source_obj,
-                            label=getattr(source_obj, "Label", obj.name),
-                            parent_child_module_id=child_pcm_id,
-                            coordinates=child_relative_coords,
+                    target_parent_container = created_obj
+                    has_duplicates = child_id_counts.get(child_id, 0) > 1
+                    if (
+                        has_duplicates
+                        and child_id not in duplicate_group_by_id
+                        and child_id in first_loaded_child_by_id
+                    ):
+                        first_obj = first_loaded_child_by_id[child_id]
+                        group_label = getattr(first_obj, "Label", "Module")
+                        duplicate_group = self._create_document_group(
+                            group_label, created_obj
                         )
-                        self._attach_to_parent_group(created_obj, link_obj)
-                        continue
-
+                        if duplicate_group:
+                            self._remove_from_parent_group(created_obj, first_obj)
+                            self._attach_to_parent_group(duplicate_group, first_obj)
+                            duplicate_group_by_id[child_id] = duplicate_group
+                    if child_id in duplicate_group_by_id:
+                        target_parent_container = duplicate_group_by_id[child_id]
                     child_obj = self._load_object(
                         child_id,
                         depth=child_depth - 1,
@@ -782,10 +805,14 @@ class PLMMainWindow(QtWidgets.QWidget):
                         parent_child_module_id=child_pcm_id,
                         child_depths_dict=child_depths_dict,
                         absolute_coordinates_dict=absolute_coordinates_dict,
-                        parent_container=created_obj
+                        parent_container=target_parent_container,
                     )
-                    if child_obj is not None:
-                        created_children_by_key[cache_key] = child_obj
+                    if (
+                        has_duplicates
+                        and child_obj is not None
+                        and child_id not in first_loaded_child_by_id
+                    ):
+                        first_loaded_child_by_id[child_id] = child_obj
                 else:
                     log(f"Skipping child {child_id} (depth=0)")
 
