@@ -595,6 +595,59 @@ class PLMMainWindow(QtWidgets.QWidget):
         
         return result
 
+    def _apply_placement_from_coordinates(self, cad_obj, coords_dict):
+        """Применяет Placement к объекту FreeCAD из словаря координат."""
+        if not coords_dict:
+            return
+        try:
+            axis = coords_dict.get("axis", {"x": 0.0, "y": 0.0, "z": 0.0})
+            cad_obj.Placement.Base.x = coords_dict.get("x", 0.0)
+            cad_obj.Placement.Base.y = coords_dict.get("y", 0.0)
+            cad_obj.Placement.Base.z = coords_dict.get("z", 0.0)
+            cad_obj.Placement.Rotation.Angle = coords_dict.get("angle", 0.0)
+            cad_obj.Placement.Rotation.Axis.x = axis.get("x", 0.0)
+            cad_obj.Placement.Rotation.Axis.y = axis.get("y", 0.0)
+            cad_obj.Placement.Rotation.Axis.z = axis.get("z", 0.0)
+        except Exception as e:
+            log(f"Failed to apply placement for {getattr(cad_obj, 'Label', 'unknown')}: {str(e)}")
+
+    def _set_parent_child_module_id(self, cad_obj, parent_child_module_id):
+        """Сохраняет ID записи parent_child_module в объекте FreeCAD."""
+        if not parent_child_module_id:
+            return
+        try:
+            if not hasattr(cad_obj, "ParentChildModuleId"):
+                cad_obj.addProperty("App::PropertyString", "ParentChildModuleId")
+            cad_obj.ParentChildModuleId = parent_child_module_id
+        except Exception as e:
+            log(f"Failed to set ParentChildModuleId for {getattr(cad_obj, 'Label', 'unknown')}: {str(e)}")
+
+    def _attach_to_parent_group(self, parent_obj, child_obj):
+        """Добавляет child_obj в Group родителя."""
+        if not parent_obj or not child_obj:
+            return
+        try:
+            current_group = list(parent_obj.Group) if hasattr(parent_obj, "Group") else []
+            current_group.append(child_obj)
+            parent_obj.Group = current_group
+        except Exception as e:
+            log(f"Failed to attach {getattr(child_obj, 'Label', 'unknown')} to parent group: {str(e)}")
+
+    def _create_link_instance(self, source_obj, label, parent_child_module_id=None, coordinates=None):
+        """Создает экземпляр-ссылку App::Link на source_obj."""
+        try:
+            import FreeCAD as App
+            doc = App.ActiveDocument
+            link_obj = doc.addObject("App::Link", f"Link_{label}")
+            link_obj.setLink(source_obj)
+            link_obj.Label = label
+            self._set_parent_child_module_id(link_obj, parent_child_module_id)
+            self._apply_placement_from_coordinates(link_obj, coordinates)
+            return link_obj
+        except Exception as e:
+            log(f"Failed to create link instance for {label}: {str(e)}")
+            return None
+
     def load_object_in_same_doc(self, obj_id):
         try:
             try:
@@ -610,7 +663,17 @@ class PLMMainWindow(QtWidgets.QWidget):
 
         self.last_opened_obj_ids.append(obj_id)
 
-    def _load_object(self, obj_id, depth=1, is_recursive_call=False, parent_coordinates=None, parent_child_module_id=None, child_depths_dict=None, absolute_coordinates_dict=None):
+    def _load_object(
+        self,
+        obj_id,
+        depth=1,
+        is_recursive_call=False,
+        parent_coordinates=None,
+        parent_child_module_id=None,
+        child_depths_dict=None,
+        absolute_coordinates_dict=None,
+        parent_container=None
+    ):
         response = self.api_client.send_get_request(
             "/api/basic_object/{id}",
             path_params={"id": obj_id}
@@ -620,7 +683,9 @@ class PLMMainWindow(QtWidgets.QWidget):
 
         if not obj:
             log(f"Failed to load object with ID: {obj_id}")
-            return
+            return None
+
+        created_obj = None
 
         # Сначала загружаем геометрию самого объекта (если есть BREP)
         should_load_geometry = bool(obj.brep_string)
@@ -646,7 +711,7 @@ class PLMMainWindow(QtWidgets.QWidget):
                     log(f"Applying coordinates for {obj.name}: {coords_dict}")
                 else:
                     log(
-                        f"Абсолютные координаты для рекурсивной загрузки не найдены "
+                        f"Координаты для рекурсивной загрузки не найдены "
                         f"({obj.name}, id={obj.id}), объект будет загружен без placement (по умолчанию)"
                     )
 
@@ -658,13 +723,29 @@ class PLMMainWindow(QtWidgets.QWidget):
                 parent_child_module_id=parent_child_module_id
             )
 
-            CADUtils.create_part_with_brep(part_dto)
+            created_obj = CADUtils.create_part_with_brep(part_dto)
+            self._attach_to_parent_group(parent_container, created_obj)
         else:
             log(f"Skipping object {obj.name} (ID: {obj_id}) - no BREP data")
+
+        # Для сборок без собственного BREP создаем пустой контейнер,
+        # чтобы сохранять вложенную иерархию в документе.
+        if created_obj is None and obj.is_assembly:
+            try:
+                import FreeCAD as App
+                doc = App.ActiveDocument
+                created_obj = doc.addObject('App::Part', obj.name)
+                self._set_parent_child_module_id(created_obj, parent_child_module_id)
+                self._apply_placement_from_coordinates(created_obj, parent_coordinates)
+                self._attach_to_parent_group(parent_container, created_obj)
+                log(f"Created assembly container for {obj.name} without BREP")
+            except Exception as e:
+                log(f"Failed to create assembly container for {obj.name}: {str(e)}")
 
         # Потом загружаем детей (если это сборка)
         if obj.is_assembly and obj.children_with_coordinates:
             log(f"Loading assembly {obj.name} with {len(obj.children_with_coordinates)} children")
+            created_children_by_key = {}
             for child_entry in obj.children_with_coordinates:
                 child_id = child_entry["child_id"]
                 child_pcm_id = child_entry.get("parent_child_module_id")
@@ -676,24 +757,39 @@ class PLMMainWindow(QtWidgets.QWidget):
                         child_depth = child_depths_dict[key]
                 
                 if child_depth > 0:
-                    child_absolute_coords = None
-                    parent_instance_key = parent_child_module_id if parent_child_module_id else "root"
-                    child_pcm_key = child_pcm_id if child_pcm_id else "default"
-                    log(f"DEBUG: Looking for child_id={child_id}, parent_instance_key={parent_instance_key}, child_pcm_key={child_pcm_key}")
-                    if absolute_coordinates_dict and child_id in absolute_coordinates_dict:
-                        child_by_parent = absolute_coordinates_dict[child_id].get(parent_instance_key, {})
-                        if child_pcm_key in child_by_parent:
-                            child_absolute_coords = child_by_parent[child_pcm_key]
-                            log(f"DEBUG: Found coords: {child_absolute_coords}")
-                        else:
-                            log(
-                                f"DEBUG: Not found child_pcm_key={child_pcm_key}, "
-                                f"available keys={list(child_by_parent.keys())}"
-                            )
-                    
-                    self._load_object(child_id, depth=child_depth - 1, is_recursive_call=True, parent_coordinates=child_absolute_coords, parent_child_module_id=child_pcm_id, child_depths_dict=child_depths_dict, absolute_coordinates_dict=absolute_coordinates_dict)
+                    # Для вложенной структуры в Group используем локальные координаты
+                    # связи parent->child (из children_with_coordinates).
+                    child_relative_coords = child_entry.get("coordinates") or None
+
+                    # На одном уровне повторные child_id создаем через App::Link на первый объект.
+                    cache_key = (child_id, child_depth)
+                    if cache_key in created_children_by_key:
+                        source_obj = created_children_by_key[cache_key]
+                        link_obj = self._create_link_instance(
+                            source_obj=source_obj,
+                            label=getattr(source_obj, "Label", obj.name),
+                            parent_child_module_id=child_pcm_id,
+                            coordinates=child_relative_coords,
+                        )
+                        self._attach_to_parent_group(created_obj, link_obj)
+                        continue
+
+                    child_obj = self._load_object(
+                        child_id,
+                        depth=child_depth - 1,
+                        is_recursive_call=True,
+                        parent_coordinates=child_relative_coords,
+                        parent_child_module_id=child_pcm_id,
+                        child_depths_dict=child_depths_dict,
+                        absolute_coordinates_dict=absolute_coordinates_dict,
+                        parent_container=created_obj
+                    )
+                    if child_obj is not None:
+                        created_children_by_key[cache_key] = child_obj
                 else:
                     log(f"Skipping child {child_id} (depth=0)")
+
+        return created_obj
 
     def toggle_mcp_server(self):
         """Включает или выключает MCP сервер"""
