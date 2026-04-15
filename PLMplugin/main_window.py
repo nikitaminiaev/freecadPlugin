@@ -180,10 +180,16 @@ class PLMMainWindow(QtWidgets.QWidget):
                 parent_id = self._upload_single_object(parent_dto, author, None, is_assembly=True, is_shell=False)
                 if parent_id:
                     CADUtils.set_id(active_doc, parent_id)
-            
             child_ids = {}
+            placements_to_restore = {}
             for selected_obj in selected_objs:
+                # Сохраняем координаты и сбрасываем Placement (для не-сборок)
+                saved_coordinates = self._extract_and_reset_placement(selected_obj)
+                placements_to_restore[selected_obj] = saved_coordinates
+
                 part_dto = CADUtils.create_dto_from_object(selected_obj)
+                # Заменяем координаты в DTO на сохранённые (до сброса)
+                part_dto.coordinates = saved_coordinates
                 if comment and part_dto.label in comment:
                     part_dto.id = comment[part_dto.label]
                 
@@ -211,6 +217,13 @@ class PLMMainWindow(QtWidgets.QWidget):
                     
             if child_ids:
                 active_doc.Comment = json.dumps(child_ids)
+
+            if is_assembly and parent_id:
+                self.plm_functions.save_position(parent_id)
+
+            # Восстанавливаем Placement после сохранения, чтобы объекты остались на месте визуально
+            for obj, coords in placements_to_restore.items():
+                CADUtils.restore_placement(obj, coords)
 
         except ImportError:
             QtWidgets.QMessageBox.critical(self, 'Error', 'FreeCAD module not available!')
@@ -292,8 +305,31 @@ class PLMMainWindow(QtWidgets.QWidget):
                 return data['id']
             return None
         except Exception as e:
-            QtWidgets.QMessageBox.critical(self, 'Error', f'Error uploading object: {str(e)}')
+            QtWidgets.QMessageBox.warning(self, 'Error', f'Error uploading object: {str(e)}')
             return None
+
+    def _extract_and_reset_placement(self, obj) -> Coordinates:
+        """Извлекает координаты из Placement объекта и сбрасывает его.
+
+        Args:
+            obj: FreeCAD объект
+
+        Returns:
+            Coordinates: Сохранённые координаты до сброса
+        """
+        saved_coordinates = Coordinates(
+            x=obj.Placement.Base.x,
+            y=obj.Placement.Base.y,
+            z=obj.Placement.Base.z,
+            angle=obj.Placement.Rotation.Angle,
+            axis={
+                'x': obj.Placement.Rotation.Axis.x,
+                'y': obj.Placement.Rotation.Axis.y,
+                'z': obj.Placement.Rotation.Axis.z
+            }
+        )
+        CADUtils.reset_placement(obj)
+        return saved_coordinates
 
     def search_part(self):
         part_name = self.textInput.text()
@@ -387,6 +423,10 @@ class PLMMainWindow(QtWidgets.QWidget):
             except:
                 obj_id = self.get_object_id_from_plm_select()
 
+            if obj_id is None:
+                QtWidgets.QMessageBox.information(self, 'Info', 'Please select any object')
+                return
+
             # Fetch the parents of the object
             response = self.api_client.send_get_request(
                 "/api/basic_object/{id}/parent_ids",
@@ -402,15 +442,64 @@ class PLMMainWindow(QtWidgets.QWidget):
                 self.load_object_in_new_doc(parent_ids[0])
                 return
 
-            for parent_id in parent_ids:
-                if parent_id in self.last_opened_obj_ids:
-                    self.load_object_in_new_doc(parent_id)
-                    return
+            last_opened_parent_id = self._get_last_opened_parent_id(parent_ids)
+            if last_opened_parent_id:
+                self.load_object_in_new_doc(last_opened_parent_id)
+                return
 
-            #todo далее кейс когда надо показывать окно с выбором парента
+            selected_parent_id = self._ask_user_to_select_parent(parent_ids)
+            if selected_parent_id is None:
+                return
+
+            self.load_object_in_new_doc(selected_parent_id)
 
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
+
+    def _get_last_opened_parent_id(self, parent_ids):
+        """Возвращает последнего открытого родителя из списка parent_ids."""
+        available_parent_ids = set(parent_ids)
+        for opened_id in reversed(self.last_opened_obj_ids):
+            if opened_id not in available_parent_ids:
+                continue
+            return opened_id
+        return None
+
+    def _ask_user_to_select_parent(self, parent_ids):
+        """Показывает диалог выбора родителя и возвращает его ID."""
+        parent_titles = []
+        for parent_id in parent_ids:
+            parent_name = self._get_object_name_by_id(parent_id)
+            parent_title = f"{parent_name} ({parent_id})" if parent_name else str(parent_id)
+            parent_titles.append(parent_title)
+
+        selected_parent_title, is_selected = QtWidgets.QInputDialog.getItem(
+            self,
+            'Выбор родителя',
+            'Выберите родительский объект:',
+            parent_titles,
+            0,
+            False
+        )
+        if not is_selected or not selected_parent_title:
+            return None
+
+        selected_index = parent_titles.index(selected_parent_title)
+        return parent_ids[selected_index]
+
+    def _get_object_name_by_id(self, obj_id):
+        """Возвращает имя объекта по ID для отображения в UI."""
+        try:
+            response = self.api_client.send_get_request(
+                "/api/basic_object/{id}",
+                path_params={"id": obj_id}
+            )
+            data = json.loads(response)
+            if isinstance(data, dict):
+                return data.get('name')
+            return None
+        except Exception:
+            return None
 
     def get_object_id_from_plm_select(self):
         selected_objects = self.resultsTree.selectedItems()
@@ -432,18 +521,148 @@ class PLMMainWindow(QtWidgets.QWidget):
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
 
-    def load_object_in_new_doc(self, obj_id):
+    def load_object_in_new_doc(self, obj_id, child_depths=None, absolute_coordinates=None):
         try:
+            log(f"DEBUG load_object_in_new_doc: obj_id={obj_id}")
+            log(f"DEBUG load_object_in_new_doc: child_depths={child_depths}")
+            log(f"DEBUG load_object_in_new_doc: absolute_coordinates count={len(absolute_coordinates) if absolute_coordinates else 0}")
+            
+            response = self.api_client.send_get_request(
+                "/api/basic_object/{id}",
+                path_params={"id": obj_id}
+            )
+            data = json.loads(response)
+            obj = BasicObject.from_response(data)
+            
+            doc_name = obj.name if obj and obj.name and obj.name != 'N/A' else f"Document_{obj_id}"
+            
             CADUtils.close_active_doc()
-            active_doc = CADUtils.create_new_doc(f"Document_{obj_id}")
-
-            self._load_object(obj_id, is_recursive_call=False)
+            active_doc = CADUtils.create_new_doc(doc_name)
+            
+            # Создаем словарь для быстрого поиска depth по child_id и parent_child_module_id
+            child_depths_dict = {}
+            if child_depths:
+                for cd in child_depths:
+                    key = (cd.get('child_id'), cd.get('parent_child_module_id'))
+                    child_depths_dict[key] = cd.get('depth', 1)
+            
+            log(f"DEBUG load_object_in_new_doc: child_depths_dict={child_depths_dict}")
+            
+            # Создаем словарь absolute_coordinates для быстрого поиска
+            absolute_coordinates_dict = self._build_absolute_coordinates_dict(absolute_coordinates or [])
+            
+            self._load_object(obj_id, depth=1, child_depths_dict=child_depths_dict, absolute_coordinates_dict=absolute_coordinates_dict, is_recursive_call=False)
             CADUtils.recompute_doc()
             CADUtils.set_id(active_doc, obj_id)
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred while loading the object: {str(e)}')
 
         self.last_opened_obj_ids.append(obj_id)
+    
+    def _build_absolute_coordinates_dict(self, absolute_coordinates: list) -> dict:
+        """
+        Создает словарь для быстрого поиска абсолютных координат.
+        
+        Структура:
+        result[child_id][parent_instance_pcm_key][child_pcm_key] = coordinates
+        
+        Пример:
+        result = {
+            '6776e684': {
+                'a5153e34': {'4c0a6125': {x:0, z:56}},
+                '0273bdc8': {'4c0a6125': {x:41, z:26}}
+            },
+        }
+        """
+        result = {}
+        for entry in absolute_coordinates:
+            obj_id = entry.get("object_id")
+            pcm_id = entry.get("parent_child_module_id")
+            parent_instance_pcm_id = entry.get("parent_instance_pcm_id")
+            
+            if not obj_id:
+                continue
+            
+            if obj_id not in result:
+                result[obj_id] = {}
+            
+            parent_instance_key = parent_instance_pcm_id if parent_instance_pcm_id else "root"
+            if parent_instance_key not in result[obj_id]:
+                result[obj_id][parent_instance_key] = {}
+
+            child_pcm_key = pcm_id if pcm_id else "default"
+            result[obj_id][parent_instance_key][child_pcm_key] = entry.get("absolute_coordinates")
+        
+        return result
+
+    def _apply_placement_from_coordinates(self, cad_obj, coords_dict):
+        """Применяет Placement к объекту FreeCAD из словаря координат."""
+        if not coords_dict:
+            return
+        try:
+            axis = coords_dict.get("axis", {"x": 0.0, "y": 0.0, "z": 0.0})
+            cad_obj.Placement.Base.x = coords_dict.get("x", 0.0)
+            cad_obj.Placement.Base.y = coords_dict.get("y", 0.0)
+            cad_obj.Placement.Base.z = coords_dict.get("z", 0.0)
+            cad_obj.Placement.Rotation.Angle = coords_dict.get("angle", 0.0)
+            cad_obj.Placement.Rotation.Axis.x = axis.get("x", 0.0)
+            cad_obj.Placement.Rotation.Axis.y = axis.get("y", 0.0)
+            cad_obj.Placement.Rotation.Axis.z = axis.get("z", 0.0)
+        except Exception as e:
+            log(f"Failed to apply placement for {getattr(cad_obj, 'Label', 'unknown')}: {str(e)}")
+
+    def _set_parent_child_module_id(self, cad_obj, parent_child_module_id):
+        """Сохраняет ID записи parent_child_module в объекте FreeCAD."""
+        if not parent_child_module_id:
+            return
+        try:
+            if not hasattr(cad_obj, "ParentChildModuleId"):
+                cad_obj.addProperty("App::PropertyString", "ParentChildModuleId")
+            cad_obj.ParentChildModuleId = parent_child_module_id
+        except Exception as e:
+            log(f"Failed to set ParentChildModuleId for {getattr(cad_obj, 'Label', 'unknown')}: {str(e)}")
+
+    def _attach_to_parent_group(self, parent_obj, child_obj):
+        """Добавляет child_obj в Group родителя."""
+        if not parent_obj or not child_obj:
+            return
+        try:
+            current_group = list(parent_obj.Group) if hasattr(parent_obj, "Group") else []
+            current_group.append(child_obj)
+            parent_obj.Group = current_group
+        except Exception as e:
+            log(f"Failed to attach {getattr(child_obj, 'Label', 'unknown')} to parent group: {str(e)}")
+
+    def _remove_from_parent_group(self, parent_obj, child_obj):
+        """Удаляет child_obj из parent_obj.Group."""
+        if not parent_obj or not child_obj:
+            return
+        try:
+            if not hasattr(parent_obj, "Group"):
+                return
+            current_group = list(parent_obj.Group)
+            if child_obj not in current_group:
+                return
+            current_group.remove(child_obj)
+            parent_obj.Group = current_group
+        except Exception as e:
+            log(
+                f"Failed to remove {getattr(child_obj, 'Label', 'unknown')} "
+                f"from parent group: {str(e)}"
+            )
+
+    def _create_document_group(self, label, parent_container=None):
+        try:
+            import FreeCAD as App
+            doc = App.ActiveDocument
+            group_obj = doc.addObject("App::DocumentObjectGroup", "Group")
+            group_obj.Label = label
+            if parent_container:
+                self._attach_to_parent_group(parent_container, group_obj)
+            return group_obj
+        except Exception as e:
+            log(f"Failed to create document group for {label}: {str(e)}")
+            return None
 
     def load_object_in_same_doc(self, obj_id):
         try:
@@ -453,62 +672,151 @@ class PLMMainWindow(QtWidgets.QWidget):
                 QtWidgets.QMessageBox.critical(self, 'Error', 'no active doc!')
                 return
 
-            self._load_object(obj_id, is_recursive_call=False)
+            self._load_object(obj_id, depth=0, child_depths_dict=None, is_recursive_call=False)
             CADUtils.recompute_doc()
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred while loading the object: {str(e)}')
 
         self.last_opened_obj_ids.append(obj_id)
 
-    def _load_object(self, obj_id, max_depth=10, is_recursive_call=False):
+    def _load_object(
+        self,
+        obj_id,
+        depth=1,
+        is_recursive_call=False,
+        parent_coordinates=None,
+        parent_child_module_id=None,
+        child_depths_dict=None,
+        absolute_coordinates_dict=None,
+        parent_container=None
+    ):
         response = self.api_client.send_get_request(
             "/api/basic_object/{id}",
             path_params={"id": obj_id}
         )
         data = json.loads(response)
         obj = BasicObject.from_response(data)
-        
+
         if not obj:
             log(f"Failed to load object with ID: {obj_id}")
-            return
+            return None
 
-        # Если это сборка и мы можем идти глубже, загружаем детей
-        if obj.is_assembly and max_depth > 0 and obj.children:
-            log(f"Loading assembly {obj.name} with {len(obj.children)} children")
-            for child_id in obj.children:
-                # Рекурсивно вызываем загрузку для детей, помечая что это вызов из сборки
-                self._load_object(child_id, max_depth - 1, is_recursive_call=True)
-            return
+        created_obj = None
 
-        # Логика загрузки геометрии:
-        # 1. Если это прямой вызов (не из сборки), грузим всегда, если есть BREP
-        # 2. Если это вызов из сборки, грузим только если is_shell=True
-        should_load_geometry = False
-        if not is_recursive_call and obj.brep_string:
-            should_load_geometry = True
-            log(f"Direct load: creating part for {obj.name}")
-        elif is_recursive_call and obj.is_shell:
-            should_load_geometry = True
-            log(f"Assembly load: creating shell part for {obj.name}")
+        # Сначала загружаем геометрию самого объекта (если есть BREP)
+        should_load_geometry = bool(obj.brep_string)
+        if should_load_geometry:
+            if obj.is_assembly:
+                load_context = "recursive" if is_recursive_call else "direct"
+                log(f"Assembly {load_context} load: creating part for {obj.name}")
+            else:
+                log(f"Part load: creating part for {obj.name}")
 
         if should_load_geometry:
+            coordinates = None
+            if is_recursive_call:
+                if parent_coordinates:
+                    coords_dict = parent_coordinates
+                    coordinates = Coordinates(
+                        x=coords_dict.get("x", 0.0),
+                        y=coords_dict.get("y", 0.0),
+                        z=coords_dict.get("z", 0.0),
+                        angle=coords_dict.get("angle", 0.0),
+                        axis=coords_dict.get("axis", {"x": 0.0, "y": 0.0, "z": 0.0})
+                    )
+                    log(f"Applying coordinates for {obj.name}: {coords_dict}")
+                else:
+                    log(
+                        f"Координаты для рекурсивной загрузки не найдены "
+                        f"({obj.name}, id={obj.id}), объект будет загружен без placement (по умолчанию)"
+                    )
+
             part_dto = PartCreationDTO(
                 brep_string=obj.brep_string,
                 id=obj.id,
                 label=obj.name,
-                coordinates=Coordinates(
-                    x=obj.coordinates["x"],
-                    y=obj.coordinates["y"],
-                    z=obj.coordinates["z"],
-                    angle=obj.coordinates["angle"],
-                    axis=obj.coordinates["axis"]
-                )
+                coordinates=coordinates,
+                parent_child_module_id=parent_child_module_id
             )
 
-            CADUtils.create_part_with_brep(part_dto)
+            created_obj = CADUtils.create_part_with_brep(part_dto)
+            self._attach_to_parent_group(parent_container, created_obj)
         else:
-            reason = "is_shell is False in assembly" if is_recursive_call else "no BREP data"
-            log(f"Skipping object {obj.name} (ID: {obj_id}) - {reason}")
+            log(f"Skipping object {obj.name} (ID: {obj_id}) - no BREP data")
+
+        # Для сборок без собственного BREP создаем пустой контейнер,
+        # чтобы сохранять вложенную иерархию в документе.
+        if created_obj is None and obj.is_assembly:
+            try:
+                import FreeCAD as App
+                doc = App.ActiveDocument
+                created_obj = doc.addObject('App::Part', obj.name)
+                self._set_parent_child_module_id(created_obj, parent_child_module_id)
+                self._apply_placement_from_coordinates(created_obj, parent_coordinates)
+                self._attach_to_parent_group(parent_container, created_obj)
+                log(f"Created assembly container for {obj.name} without BREP")
+            except Exception as e:
+                log(f"Failed to create assembly container for {obj.name}: {str(e)}")
+
+        # Потом загружаем детей (если это сборка)
+        if obj.is_assembly and obj.children_with_coordinates:
+            log(f"Loading assembly {obj.name} with {len(obj.children_with_coordinates)} children")
+            child_id_counts = {}
+            for child_entry in obj.children_with_coordinates:
+                cid = child_entry["child_id"]
+                child_id_counts[cid] = child_id_counts.get(cid, 0) + 1
+            first_loaded_child_by_id = {}
+            duplicate_group_by_id = {}
+            for child_entry in obj.children_with_coordinates:
+                child_id = child_entry["child_id"]
+                child_pcm_id = child_entry.get("parent_child_module_id")
+
+                child_depth = depth
+                if child_depths_dict:
+                    key = (child_id, child_pcm_id)
+                    if key in child_depths_dict:
+                        child_depth = child_depths_dict[key]
+
+                if child_depth > 0:
+                    child_relative_coords = child_entry.get("coordinates") or None
+                    target_parent_container = created_obj
+                    has_duplicates = child_id_counts.get(child_id, 0) > 1
+                    if (
+                        has_duplicates
+                        and child_id not in duplicate_group_by_id
+                        and child_id in first_loaded_child_by_id
+                    ):
+                        first_obj = first_loaded_child_by_id[child_id]
+                        group_label = getattr(first_obj, "Label", "Module")
+                        duplicate_group = self._create_document_group(
+                            group_label, created_obj
+                        )
+                        if duplicate_group:
+                            self._remove_from_parent_group(created_obj, first_obj)
+                            self._attach_to_parent_group(duplicate_group, first_obj)
+                            duplicate_group_by_id[child_id] = duplicate_group
+                    if child_id in duplicate_group_by_id:
+                        target_parent_container = duplicate_group_by_id[child_id]
+                    child_obj = self._load_object(
+                        child_id,
+                        depth=child_depth - 1,
+                        is_recursive_call=True,
+                        parent_coordinates=child_relative_coords,
+                        parent_child_module_id=child_pcm_id,
+                        child_depths_dict=child_depths_dict,
+                        absolute_coordinates_dict=absolute_coordinates_dict,
+                        parent_container=target_parent_container,
+                    )
+                    if (
+                        has_duplicates
+                        and child_obj is not None
+                        and child_id not in first_loaded_child_by_id
+                    ):
+                        first_loaded_child_by_id[child_id] = child_obj
+                else:
+                    log(f"Skipping child {child_id} (depth=0)")
+
+        return created_obj
 
     def toggle_mcp_server(self):
         """Включает или выключает MCP сервер"""

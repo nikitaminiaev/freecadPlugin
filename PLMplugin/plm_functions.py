@@ -1,3 +1,4 @@
+import json
 import traceback
 from function_registry import FunctionRegistry
 from utils.logger import log
@@ -46,17 +47,21 @@ class PLMFunctions:
         function_registry.register_function("go_to_supersystem", self.go_to_supersystem)
         function_registry.register_function("go_to_subsystem", self.go_to_subsystem)
         function_registry.register_function("upload_active_part", self.upload_active_part)
+        function_registry.register_function("save_brep", self.save_brep)
+        function_registry.register_function("save_position", self.save_position)
         
         log("PLMFunctions: Функции PLM успешно зарегистрированы")
     
     # Обертки для методов PLMMainWindow
     
-    def load_object_in_new_doc(self, obj_id):
+    def load_object_in_new_doc(self, obj_id, child_depths=None, absolute_coordinates=None):
         """
         Загружает объект в новый документ FreeCAD
         
         Args:
             obj_id (str): ID объекта для загрузки
+            child_depths (list): Массив объектов {child_id, parent_child_module_id, depth} для настройки глубины загрузки каждого ребенка
+            absolute_coordinates (list): Массив объектов с абсолютными координатами для каждого уровня иерархии
         
         Returns:
             dict: Результат операции
@@ -65,8 +70,8 @@ class PLMFunctions:
             return {"success": False, "error": "Главное окно не инициализировано"}
         
         try:
-            log(f"PLMFunctions: Вызов load_object_in_new_doc с ID: {obj_id}")
-            self.main_window.load_object_in_new_doc(obj_id)
+            log(f"PLMFunctions: Вызов load_object_in_new_doc с ID: {obj_id}, child_depths: {child_depths}, absolute_coordinates: {absolute_coordinates}")
+            self.main_window.load_object_in_new_doc(obj_id, child_depths=child_depths, absolute_coordinates=absolute_coordinates)
             return {
                 "success": True,
                 "message": f"object {obj_id} successfully loaded in a new document"
@@ -223,4 +228,200 @@ class PLMFunctions:
         except Exception as e:
             error_msg = f"Error uploading the active part: {str(e)}\n{traceback.format_exc()}"
             log(error_msg)
-            return {"success": False, "error": str(e)} 
+            return {"success": False, "error": str(e)}
+
+    def save_brep(self, module_id: str):
+        """
+        Экспортирует BREP первого тела из активного документа FreeCAD
+        и сохраняет его в указанный модуль через PATCH /api/basic_object/{module_id}.
+        Координаты parent_child_module не затрагиваются.
+
+        Args:
+            module_id (str): ID модуля в базе данных.
+
+        Returns:
+            dict: Результат операции.
+        """
+        if not self.main_window:
+            return {"success": False, "error": "Главное окно не инициализировано"}
+
+        try:
+            import FreeCAD
+
+            doc = FreeCAD.ActiveDocument
+            if not doc:
+                return {"success": False, "error": "Нет активного документа FreeCAD"}
+
+            return self._save_single_body(doc, module_id, self.main_window.api_client)
+
+        except ImportError:
+            log("PLMFunctions.save_brep: модуль FreeCAD недоступен")
+            return {"success": False, "error": "Модуль FreeCAD недоступен"}
+        except Exception as e:
+            log(f"PLMFunctions.save_brep: {e}\n{traceback.format_exc()}")
+            return {"success": False, "error": str(e)}
+
+    def save_position(self, module_id: str):
+        """
+        Обновляет координаты всех дочерних App::Part объектов текущего документа
+        (сборки) через PATCH /api/basic_object/{child_id} с parent_id + coordinates.
+        BREP не затрагивается.
+
+        Args:
+            module_id (str): ID родительского модуля (сборки) в базе данных.
+
+        Returns:
+            dict: Результат операции.
+        """
+        if not self.main_window:
+            return {"success": False, "error": "Главное окно не инициализировано"}
+
+        try:
+            import FreeCAD
+
+            doc = FreeCAD.ActiveDocument
+            if not doc:
+                return {"success": False, "error": "Нет активного документа FreeCAD"}
+
+            return self._save_assembly_coordinates(doc, module_id, self.main_window.api_client)
+
+        except ImportError:
+            log("PLMFunctions.save_position: модуль FreeCAD недоступен")
+            return {"success": False, "error": "Модуль FreeCAD недоступен"}
+        except Exception as e:
+            log(f"PLMFunctions.save_position: {e}\n{traceback.format_exc()}")
+            return {"success": False, "error": str(e)}
+
+    def _save_single_body(self, doc, module_id: str, api_client):
+        """
+        Находит первое тело с Shape в документе, экспортирует BREP и патчит модуль.
+        Флаги is_assembly / is_shell не затрагиваются.
+        """
+        brep_string = None
+        for obj in doc.Objects:
+            if not (hasattr(obj, 'Shape') and obj.Shape and not obj.Shape.isNull()):
+                continue
+            try:
+                brep_string = obj.Shape.exportBrepToString()
+                break
+            except Exception:
+                continue
+
+        if not brep_string:
+            return {"success": False, "error": "Не найдено ни одного тела с геометрией в активном документе"}
+
+        payload = {"brep_files": {"brep_string": brep_string}}
+        response = api_client.send_patch_request(f"/api/basic_object/{module_id}", payload)
+
+        log(f"PLMFunctions._save_single_body: ответ сервера: {response}")
+        return {"success": True, "message": f"BREP сохранён для модуля {module_id}"}
+
+    def _save_assembly_coordinates(self, doc, module_id: str, api_client):
+        """
+        Перебирает App::Part объекты, собирает их ParentChildModuleId и Placement,
+        обновляет координаты только прямых детей текущей сборки через PATCH-запрос.
+
+        Использует PATCH /api/parent_child_module/{record_id} с полями coordinates.
+        """
+        direct_children_pcm_ids = self._get_direct_children_pcm_ids(module_id, api_client)
+        if direct_children_pcm_ids is None:
+            return {
+                "success": False,
+                "error": (
+                    "Не удалось получить связи прямых детей для Save Position. "
+                    "Координаты не сохранены, чтобы избежать обновления вложенных уровней."
+                ),
+            }
+
+        if not direct_children_pcm_ids:
+            return {
+                "success": False,
+                "error": "У сборки нет прямых детей для Save Position.",
+            }
+
+        updated = 0
+        errors = []
+
+        for obj in doc.Objects:
+            if obj.TypeId != 'App::Part':
+                continue
+
+            parent_child_module_id = getattr(obj, 'ParentChildModuleId', None)
+            if not parent_child_module_id:
+                log(f"PLMFunctions._save_assembly_coordinates: объект {obj.Label} не имеет ParentChildModuleId, пропускаем")
+                continue
+
+            if parent_child_module_id not in direct_children_pcm_ids:
+                log(
+                    f"PLMFunctions._save_assembly_coordinates: объект {obj.Label} "
+                    f"(pcm_id={parent_child_module_id}) не является прямым ребенком "
+                    f"сборки {module_id}, пропускаем"
+                )
+                continue
+
+            try:
+                axis = obj.Placement.Rotation.Axis
+                coordinates = {
+                    "x": obj.Placement.Base.x,
+                    "y": obj.Placement.Base.y,
+                    "z": obj.Placement.Base.z,
+                    "angle": obj.Placement.Rotation.Angle,
+                    "axis": {"x": axis.x, "y": axis.y, "z": axis.z},
+                }
+            except Exception as e:
+                msg = f"Ошибка чтения Placement для {obj.Label}: {e}"
+                log(f"PLMFunctions._save_assembly_coordinates: {msg}")
+                errors.append(msg)
+                continue
+
+            # PATCH parent_child_module record — обновляет конкретную запись по её ID
+            payload = {"coordinates": coordinates}
+            response = api_client.send_patch_request(f"/api/parent_child_module/{parent_child_module_id}", payload)
+            log(f"PLMFunctions._save_assembly_coordinates: {obj.Label} (pcm_id={parent_child_module_id}) → {response}")
+            updated += 1
+
+        if updated == 0:
+            return {
+                "success": False,
+                "error": "Не найдено дочерних App::Part объектов с ParentChildModuleId в активном документе. Save Position работает только для сборок.",
+            }
+
+        result = {"success": True, "message": f"Координаты {updated} дочерних объектов обновлены для модуля {module_id}"}
+        if errors:
+            result["warnings"] = errors
+        return result 
+
+    def _get_direct_children_pcm_ids(self, module_id: str, api_client):
+        """
+        Возвращает множество parent_child_module_id только прямых детей сборки module_id.
+        """
+        response = api_client.send_get_request(
+            "/api/basic_object/{id}",
+            path_params={"id": module_id},
+        )
+
+        try:
+            payload = json.loads(response)
+        except Exception as e:
+            log(f"PLMFunctions._get_direct_children_pcm_ids: некорректный JSON ответа: {e}")
+            return None
+
+        if not isinstance(payload, dict):
+            log("PLMFunctions._get_direct_children_pcm_ids: ответ не является объектом")
+            return None
+
+        if payload.get("error"):
+            log(f"PLMFunctions._get_direct_children_pcm_ids: ошибка API: {payload.get('error')}")
+            return None
+
+        children_with_coordinates = payload.get("children_with_coordinates")
+        if children_with_coordinates is None:
+            log("PLMFunctions._get_direct_children_pcm_ids: в ответе нет children_with_coordinates")
+            return None
+
+        pcm_ids = {
+            entry.get("parent_child_module_id")
+            for entry in children_with_coordinates
+            if entry.get("parent_child_module_id")
+        }
+        return pcm_ids

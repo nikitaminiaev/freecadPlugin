@@ -23,6 +23,7 @@ class PartCreationDTO:
         id: Optional unique identifier for the part
         label: Optional display label for the part in FreeCAD interface
         coordinates: Optional positioning and rotation data
+        parent_child_module_id: Optional ID of the parent_child_module record
 
     Example:
         coords = Coordinates(
@@ -34,13 +35,15 @@ class PartCreationDTO:
             brep_string="... BREP data ...",
             id="unique_id_123",
             label="My Part",
-            coordinates=coords
+            coordinates=coords,
+            parent_child_module_id="uuid-record-id"
         )
     """
     brep_string: Optional[str]
     id: Optional[str] = None
     label: Optional[str] = "NewPart"
     coordinates: Optional[Coordinates] = None
+    parent_child_module_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Union[str, Dict, List]]:
         """Convert DTO to dictionary format for legacy support"""
@@ -127,9 +130,9 @@ class CADUtils:
             data (PartCreationDTO): Data transfer object containing part creation data
         """
         try:
-            import FreeCAD
+            import FreeCAD as App
             import FreeCADGui as Gui
-            doc = FreeCAD.ActiveDocument
+            doc = App.ActiveDocument
             if not doc:
                 raise Exception("No active document")
 
@@ -137,7 +140,14 @@ class CADUtils:
             body_obj = doc.addObject('Part::Feature', 'Body')
 
             shape = CADUtils._create_shape_from_brep(data.brep_string)
+            if data.coordinates is None:
+                CADUtils._reset_shape_placement(shape)
             body_obj.Shape = shape
+
+            if data.coordinates is None:
+                CADUtils._reset_object_placement(body_obj)
+                CADUtils._reset_object_placement(part_obj)
+
             part_obj.Group = [body_obj]
             CADUtils._set_object_properties(part_obj, data)
 
@@ -170,6 +180,10 @@ class CADUtils:
         try:
             if data.id is not None:
                 obj.Id = data.id
+
+            if data.parent_child_module_id is not None:
+                obj.addProperty("App::PropertyString", "ParentChildModuleId")
+                obj.ParentChildModuleId = data.parent_child_module_id
 
             if data.coordinates is not None:
                 obj.Placement.Base.x = data.coordinates.x
@@ -209,6 +223,57 @@ class CADUtils:
         except Exception as e:
             raise Exception(f'Failed to create shape from BREP: {str(e)}')
 
+    @staticmethod
+    def _reset_shape_placement(shape):
+        """Сбрасывает трансформацию формы к дефолтной."""
+        try:
+            import FreeCAD as App
+            shape.Placement = App.Placement()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _reset_object_placement(obj):
+        """Сбрасывает placement объекта к дефолтному."""
+        try:
+            import FreeCAD as App
+            obj.Placement = App.Placement()
+        except Exception:
+            pass
+
+    @staticmethod
+    def reset_placement(obj):
+        """Сбрасывает Placement объекта к дефолтному.
+
+        Для App::Part Placement не сбрасывается, чтобы save_position() работал корректно.
+
+        Args:
+            obj: FreeCAD объект
+        """
+        import FreeCAD as App
+
+        if obj.TypeId == 'App::Part':
+            return
+
+        obj.Placement = App.Placement()
+        log(f"Placement сброшен для объекта: {obj.Label}")
+
+    @staticmethod
+    def restore_placement(obj, coordinates: Coordinates):
+        """Восстанавливает Placement объекта из сохранённых координат.
+
+        Args:
+            obj: FreeCAD объект
+            coordinates: Координаты для восстановления
+        """
+        obj.Placement.Base.x = coordinates.x
+        obj.Placement.Base.y = coordinates.y
+        obj.Placement.Base.z = coordinates.z
+        obj.Placement.Rotation.Angle = coordinates.angle
+        obj.Placement.Rotation.Axis.x = coordinates.axis['x']
+        obj.Placement.Rotation.Axis.y = coordinates.axis['y']
+        obj.Placement.Rotation.Axis.z = coordinates.axis['z']
+        log(f"Placement восстановлен для объекта: {obj.Label}")
 
     @staticmethod
     def get_all_selected_obj():
