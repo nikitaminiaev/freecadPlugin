@@ -50,6 +50,7 @@ class PLMFunctions:
         function_registry.register_function("save_brep", self.save_brep)
         function_registry.register_function("save_position", self.save_position)
         function_registry.register_function("get_active_module_id", self.get_active_module_id)
+        function_registry.register_function("create_empty_part_in_new_doc", self.create_empty_part_in_new_doc)
         
         log("PLMFunctions: Функции PLM успешно зарегистрированы")
     
@@ -426,6 +427,21 @@ class PLMFunctions:
             if entry.get("parent_child_module_id")
         }
         return pcm_ids
+
+    def create_empty_part_in_new_doc(self, module_id: str, module_name: str):
+        if not self.main_window:
+            return {"success": False, "error": "Главное окно не инициализировано"}
+
+        try:
+            self.main_window.create_empty_part_in_new_doc(module_id, module_name)
+            return {
+                "success": True,
+                "message": f"Empty CAD document created for module {module_name} ({module_id})"
+            }
+        except Exception as e:
+            error_msg = f"Error creating empty CAD document: {str(e)}\n{traceback.format_exc()}"
+            log(error_msg)
+            return {"success": False, "error": str(e)}
 
     def get_active_module_id(self):
         """
