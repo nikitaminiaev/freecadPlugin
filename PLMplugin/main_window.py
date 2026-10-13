@@ -558,7 +558,21 @@ class PLMMainWindow(QtWidgets.QWidget):
             QtWidgets.QMessageBox.critical(self, 'Error', f'An error occurred while loading the object: {str(e)}')
 
         self.last_opened_obj_ids.append(obj_id)
-    
+
+    def create_empty_part_in_new_doc(self, module_id: str, module_name: str):
+        try:
+            CADUtils.close_active_doc()
+            active_doc = CADUtils.create_new_doc(module_name)
+            import FreeCAD as App
+            part_obj = active_doc.addObject('App::Part', module_name)
+            part_obj.Id = module_id
+            CADUtils.set_id(active_doc, module_id)
+            CADUtils.recompute_doc()
+            log(f"Empty CAD document created for module {module_name} ({module_id})")
+        except Exception as e:
+            log(f"Error creating empty CAD document: {str(e)}")
+            raise
+
     def _build_absolute_coordinates_dict(self, absolute_coordinates: list) -> dict:
         """
         Создает словарь для быстрого поиска абсолютных координат.
