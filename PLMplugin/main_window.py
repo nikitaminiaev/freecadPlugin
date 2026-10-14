@@ -6,6 +6,7 @@ from utils.cad_utils import CADUtils, PartCreationDTO, Coordinates
 from models import BasicObject
 from widgets import ObjectTreeWidget
 from api_client import APIClient
+import config
 from client_panel import PLMClientPanel
 from plm_functions import PLMFunctions
 from utils.logger import log
@@ -14,7 +15,8 @@ class PLMMainWindow(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
         self.last_opened_obj_ids = []
-        self.api_client = APIClient()
+        # Хост/порты берутся из config.py (авто-детект .env AppImage-сборки, дефолты dev-стека)
+        self.api_client = APIClient(host=config.get_api_host(), port=config.get_api_port())
         self.client_panel = None  # Панель клиента WebSocket
         self.is_client_panel_visible = False
         self.plm_functions = PLMFunctions(self)
@@ -111,7 +113,14 @@ class PLMMainWindow(QtWidgets.QWidget):
         
         # Добавляем основной контейнер в разделитель
         self.main_splitter.addWidget(self.main_container)
-        
+
+        # Панель клиента WebSocket создаётся сразу (скрытой):
+        # автоподключение стартует при создании и не зависит от видимости панели
+        self.client_panel = PLMClientPanel()
+        self.client_panel.set_plm_functions(self.plm_functions)
+        self.main_splitter.addWidget(self.client_panel)
+        self.client_panel.hide()
+
         # Создаем основной layout
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(self.main_splitter)
@@ -119,28 +128,17 @@ class PLMMainWindow(QtWidgets.QWidget):
     def toggle_client_panel(self):
         """Включает/выключает отображение панели клиента WebSocket"""
         if self.is_client_panel_visible:
-            # Скрываем панель
-            if self.client_panel:
-                self.client_panel.hide()
-                # Удаляем панель из разделителя
-                self.main_splitter.widget(1).setParent(None)
-                self.is_client_panel_visible = False
-                self.toggleClientPanelButton.setText('WebSocket Client')
-        else:
-            # Создаем панель, если она еще не создана
-            if not self.client_panel:
-                self.client_panel = PLMClientPanel()
-                # Передаем функции PLM в панель клиента
-                self.client_panel.set_plm_functions(self.plm_functions)
-            
-            # Добавляем панель к разделителю
-            self.main_splitter.addWidget(self.client_panel)
-            self.client_panel.show()
-            self.is_client_panel_visible = True
-            self.toggleClientPanelButton.setText('Close Client')
-            
-            # Устанавливаем соотношение размеров частей разделителя
-            self.main_splitter.setSizes([int(self.width() * 0.6), int(self.width() * 0.4)])
+            self.client_panel.hide()
+            self.is_client_panel_visible = False
+            self.toggleClientPanelButton.setText('WebSocket Client')
+            return
+
+        self.client_panel.show()
+        self.is_client_panel_visible = True
+        self.toggleClientPanelButton.setText('Close Client')
+
+        # Устанавливаем соотношение размеров частей разделителя
+        self.main_splitter.setSizes([int(self.width() * 0.6), int(self.width() * 0.4)])
 
     def update_objects_count(self):
         """Update the total objects count display"""
