@@ -1,5 +1,30 @@
 import FreeCAD
 import FreeCADGui
+from PySide2 import QtCore
+
+# Единый экземпляр главного окна плагина.
+# Создаётся при старте FreeCAD (скрыто) — клиентская панель и автоподключение
+# WebSocket стартуют сразу; команда "Open PLM Form" просто показывает окно.
+_hidden_window = None
+
+
+def _create_hidden_window():
+    """Создаёт окно плагина при старте FreeCAD (без показа).
+
+    Вызывается по QTimer — после запуска GUI event loop, чтобы не трогать
+    виджеты во время загрузки модулей."""
+    global _hidden_window
+    if _hidden_window is not None:
+        return
+    try:
+        from main_window import PLMMainWindow
+        _hidden_window = PLMMainWindow()
+        _hidden_window.hide()
+    except Exception as e:
+        FreeCAD.Console.PrintError(f"PLM autostart: {str(e)}\n")
+
+
+QtCore.QTimer.singleShot(0, _create_hidden_window)
 
 
 class MyPlugin:
@@ -7,11 +32,14 @@ class MyPlugin:
         self.form = None  # Инициализируем атрибут формы как None
 
     def Activated(self):
+        global _hidden_window
         try:
-            from main_window import PLMMainWindow
-            if self.form is None:  # Если форма еще не создана
-                self.form = PLMMainWindow()
-            if self.form:  # Проверяем, что форма успешно создана
+            # Показываем единый экземпляр (создан при старте FreeCAD или сейчас)
+            if _hidden_window is None:
+                from main_window import PLMMainWindow
+                _hidden_window = PLMMainWindow()
+            self.form = _hidden_window
+            if self.form:
                 self.form.show()
             else:
                 FreeCAD.Console.PrintError("Failed to create dialog form\n")
@@ -26,7 +54,10 @@ class MyPlugin:
         }
 
 
-FreeCADGui.addCommand('MyFormCommand', MyPlugin())
+try:
+    FreeCADGui.addCommand('MyFormCommand', MyPlugin())
+except Exception as e:
+    FreeCAD.Console.PrintError(f"PLM addCommand: {str(e)}\n")
 
 
 class MyWorkbench(FreeCADGui.Workbench):
@@ -43,4 +74,8 @@ class MyWorkbench(FreeCADGui.Workbench):
         return 'Gui::PythonWorkbench'
 
 
-FreeCADGui.addWorkbench(MyWorkbench())
+try:
+    FreeCADGui.addWorkbench(MyWorkbench())
+except Exception as e:
+    # Уже зарегистрирован (например, другой копией плагина в Mod/) — не фатально
+    FreeCAD.Console.PrintError(f"PLM addWorkbench: {str(e)}\n")

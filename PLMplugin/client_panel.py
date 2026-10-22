@@ -4,6 +4,7 @@ import time
 from plm_functions import PLMFunctions
 from PySide2 import QtWidgets, QtCore
 
+import config
 from socket_client import create_websocket_client
 import traceback
 from freecad_executor import FreeCADExecutor
@@ -43,21 +44,24 @@ class PLMClientPanel(QtWidgets.QWidget):
         # Подключаем сигнал для выполнения функций
         self.execute_function_signal.connect(self.execute_function_in_main_thread)
 
+        # Автоподключение к стеку (хост/порт из config.py) сразу при создании панели
+        self.start_autoconnect()
+
     def setup_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
 
         # Область настроек соединения
         connection_layout = QtWidgets.QGridLayout()
         
-        # Поле для хоста
+        # Поле для хоста (по умолчанию — из config.py: авто-детект .env AppImage-сборки)
         self.host_label = QtWidgets.QLabel('Хост:')
-        self.host_input = QtWidgets.QLineEdit('localhost')
+        self.host_input = QtWidgets.QLineEdit(config.get_ws_host())
         connection_layout.addWidget(self.host_label, 0, 0)
         connection_layout.addWidget(self.host_input, 0, 1)
-        
-        # Поле для порта
+
+        # Поле для порта (по умолчанию — из config.py)
         self.port_label = QtWidgets.QLabel('Порт:')
-        self.port_input = QtWidgets.QLineEdit('8765')
+        self.port_input = QtWidgets.QLineEdit(str(config.get_ws_port()))
         connection_layout.addWidget(self.port_label, 1, 0)
         connection_layout.addWidget(self.port_input, 1, 1)
         
@@ -105,40 +109,76 @@ class PLMClientPanel(QtWidgets.QWidget):
         else:
             self.disconnect_from_server()
 
+    AUTOCONNECT_ATTEMPTS = 12
+    AUTOCONNECT_INTERVAL_SEC = 5
+
     def connect_to_server(self):
+        """Подключение по кнопке: сетевая часть — в фоновом потоке, GUI не блокируется."""
         host = self.host_input.text()
         try:
             port = int(self.port_input.text())
         except ValueError:
             self.add_message("Ошибка: Порт должен быть числом")
             return
-            
+
+        self.add_message(f"Подключение к {host}:{port}...")
+        threading.Thread(target=self._perform_connection, args=(host, port), daemon=True).start()
+
+    def _perform_connection(self, host, port):
+        """Сетевая часть подключения; вызывается в фоновом потоке.
+
+        UI обновляется только через сигналы (message_received / connection_status_changed) —
+        они потокобезопасны. Возвращает True при успехе."""
         try:
-            self.add_message(f"Подключение к {host}:{port}...")
             self.send_message, self.receive_message, self.close_connection = create_websocket_client(host, port)
-            
-            # Проверяем, что функции получены корректно
-            if not self.send_message or not self.receive_message or not self.close_connection:
-                self.add_message("Ошибка: Не удалось получить функции WebSocket")
-                return
-                
-            # Тестовое сообщение для проверки соединения
-            try:
-                self.send_message("CONNECT_TEST")
-                self.add_message("Тестовое сообщение отправлено")
-            except Exception as e:
-                self.add_message(f"Ошибка при отправке тестового сообщения: {str(e)}")
-            
-            # Запускаем поток для прослушивания сообщений
-            self.is_connected = True
-            self.listener_thread = threading.Thread(target=self.listen_for_messages)
-            self.listener_thread.daemon = True
-            self.listener_thread.start()
-            
-            self.connection_status_changed.emit(True, f"Подключено к {host}:{port}")
-            
         except Exception as e:
-            self.add_message(f"Ошибка подключения: {str(e)}")
+            self.message_received.emit(f"Ошибка подключения: {str(e)}")
+            return False
+
+        # Проверяем, что функции получены корректно
+        if not self.send_message or not self.receive_message or not self.close_connection:
+            self.message_received.emit("Ошибка: Не удалось получить функции WebSocket")
+            return False
+
+        # Тестовое сообщение для проверки соединения
+        try:
+            self.send_message("CONNECT_TEST")
+            self.message_received.emit("Тестовое сообщение отправлено")
+        except Exception as e:
+            self.message_received.emit(f"Ошибка при отправке тестового сообщения: {str(e)}")
+
+        # Запускаем поток для прослушивания сообщений
+        self.is_connected = True
+        self.listener_thread = threading.Thread(target=self.listen_for_messages)
+        self.listener_thread.daemon = True
+        self.listener_thread.start()
+
+        self.connection_status_changed.emit(True, f"Подключено к {host}:{port}")
+        return True
+
+    def start_autoconnect(self):
+        """Запускает автоподключение при создании панели (вызывается из __init__)."""
+        threading.Thread(target=self.autoconnect, daemon=True).start()
+
+    def autoconnect(self):
+        """Фоновое автоподключение к стеку из config.py.
+
+        Ретраи нужны: панель создаётся при старте FreeCAD, а стек (AppImage/dev)
+        может подниматься дольше."""
+        host = config.get_ws_host()
+        port = config.get_ws_port()
+
+        for attempt in range(1, self.AUTOCONNECT_ATTEMPTS + 1):
+            if self.is_connected:
+                return
+            self.message_received.emit(
+                f"Автоподключение к {host}:{port} (попытка {attempt}/{self.AUTOCONNECT_ATTEMPTS})...")
+            if self._perform_connection(host, port):
+                return
+            time.sleep(self.AUTOCONNECT_INTERVAL_SEC)
+
+        self.message_received.emit(
+            f"Автоподключение не удалось ({self.AUTOCONNECT_ATTEMPTS} попыток). Подключитесь кнопкой.")
 
     def disconnect_from_server(self):
         if self.close_connection:

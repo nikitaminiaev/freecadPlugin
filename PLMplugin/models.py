@@ -36,7 +36,29 @@ class BasicObject:
             self.brep_string = None
         else:
             self.file_path = brep_files.get('path')
-            self.brep_string = brep_files.get('brep_string')
+            self.brep_string = self._extract_brep_string(brep_files)
+
+    @staticmethod
+    def _extract_brep_string(brep_files: dict):
+        """Возвращает BREP-содержимое из brep_files.
+
+        Модули, сохранённые из FreeCAD, хранят BREP под ключом 'brep_string'.
+        Модули, загруженные через web-форму, — под реальным именем файла
+        (например 'COMPOUND029.brep'), значением является содержимое файла.
+        """
+        if not brep_files:
+            return None
+
+        explicit = brep_files.get('brep_string')
+        if explicit:
+            return explicit
+
+        # Фолбэк: первый непустой файл, загруженный через web-форму
+        for content in brep_files.values():
+            if isinstance(content, str) and content.strip():
+                return content
+
+        return None
 
     @classmethod
     def from_response(cls, response_data):
